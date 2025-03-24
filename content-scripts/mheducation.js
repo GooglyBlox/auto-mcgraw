@@ -14,6 +14,12 @@ function setupMessageListener() {
       sendResponse({ received: true });
       return true;
     }
+
+    if (message.type === "alertMessage") {
+      alert(message.message);
+      sendResponse({ received: true });
+      return true;
+    }
   };
 
   chrome.runtime.onMessage.addListener(messageListener);

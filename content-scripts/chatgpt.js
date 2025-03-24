@@ -1,20 +1,44 @@
 let hasResponded = false;
 let messageCountAtQuestion = 0;
+let observationStartTime = 0;
+let observationTimeout = null;
+let observer = null;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "receiveQuestion") {
+    resetObservation();
+
     const messages = document.querySelectorAll(
       '[data-message-author-role="assistant"]'
     );
     messageCountAtQuestion = messages.length;
     hasResponded = false;
-    insertQuestion(message.question);
-    sendResponse({ received: true });
+
+    insertQuestion(message.question)
+      .then(() => {
+        sendResponse({ received: true, status: "processing" });
+      })
+      .catch((error) => {
+        sendResponse({ received: false, error: error.message });
+      });
+
     return true;
   }
 });
 
-function insertQuestion(questionData) {
+function resetObservation() {
+  hasResponded = false;
+  if (observationTimeout) {
+    clearTimeout(observationTimeout);
+    observationTimeout = null;
+  }
+  if (observer) {
+    observer.disconnect();
+    observer = null;
+  }
+}
+
+async function insertQuestion(questionData) {
   const { type, question, options, previousCorrection } = questionData;
   let text = `Type: ${type}\nQuestion: ${question}`;
 
@@ -53,24 +77,42 @@ function insertQuestion(questionData) {
   text +=
     '\n\nPlease provide your answer in JSON format with keys "answer" and "explanation". Explanations should be no more than one sentence. DO NOT acknowledge the correction in your response, only answer the new question.';
 
-  const inputArea = document.getElementById("prompt-textarea");
-  if (inputArea) {
-    inputArea.focus();
-    inputArea.innerHTML = `<p>${text}</p>`;
-    inputArea.dispatchEvent(new Event("input", { bubbles: true }));
+  return new Promise((resolve, reject) => {
+    const inputArea = document.getElementById("prompt-textarea");
+    if (inputArea) {
+      setTimeout(() => {
+        inputArea.focus();
+        inputArea.innerHTML = `<p>${text}</p>`;
+        inputArea.dispatchEvent(new Event("input", { bubbles: true }));
 
-    setTimeout(() => {
-      const sendButton = document.querySelector('[data-testid="send-button"]');
-      if (sendButton) {
-        sendButton.click();
-        startObserving();
-      }
-    }, 500);
-  }
+        setTimeout(() => {
+          const sendButton = document.querySelector(
+            '[data-testid="send-button"]'
+          );
+          if (sendButton) {
+            sendButton.click();
+            startObserving();
+            resolve();
+          } else {
+            reject(new Error("Send button not found"));
+          }
+        }, 300);
+      }, 300);
+    } else {
+      reject(new Error("Input area not found"));
+    }
+  });
 }
 
 function startObserving() {
-  const observer = new MutationObserver((mutations) => {
+  observationStartTime = Date.now();
+  observationTimeout = setTimeout(() => {
+    if (!hasResponded) {
+      resetObservation();
+    }
+  }, 180000);
+
+  observer = new MutationObserver((mutations) => {
     if (hasResponded) return;
 
     const messages = document.querySelectorAll(
@@ -106,16 +148,43 @@ function startObserving() {
       const parsed = JSON.parse(responseText);
       if (parsed.answer && !hasResponded) {
         hasResponded = true;
-        chrome.runtime.sendMessage({
-          type: "chatGPTResponse",
-          response: responseText,
-        });
-        observer.disconnect();
+        chrome.runtime
+          .sendMessage({
+            type: "chatGPTResponse",
+            response: responseText,
+          })
+          .then(() => {
+            resetObservation();
+          })
+          .catch((error) => {
+            console.error("Error sending response:", error);
+          });
       }
     } catch (e) {
-      // Not yet a valid JSON or still generating
+      const isGenerating = latestMessage.querySelector(".result-streaming");
+      if (!isGenerating && Date.now() - observationStartTime > 30000) {
+        const responseText = latestMessage.textContent.trim();
+        try {
+          const jsonPattern =
+            /\{[\s\S]*?"answer"[\s\S]*?"explanation"[\s\S]*?\}/;
+          const jsonMatch = responseText.match(jsonPattern);
+
+          if (jsonMatch && !hasResponded) {
+            hasResponded = true;
+            chrome.runtime.sendMessage({
+              type: "chatGPTResponse",
+              response: jsonMatch[0],
+            });
+            resetObservation();
+          }
+        } catch (e) {}
+      }
     }
   });
 
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
 }
