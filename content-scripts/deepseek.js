@@ -9,7 +9,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "receiveQuestion") {
     resetObservation();
 
-    const messages = document.querySelectorAll(".f9bf7997");
+    const messages = document.querySelectorAll(
+      "[data-testid='chat-message-assistant'], model-response, .ds-markdown"
+    );
     messageCountAtQuestion = messages.length;
     hasResponded = false;
 
@@ -96,14 +98,20 @@ async function insertQuestion(questionData) {
             'button[type="submit"]',
             '[aria-label="Send message"]',
             ".bf38813a button",
+            "button:has(svg)",
+            '[data-testid="send-button"]',
           ];
 
           let sendButton = null;
           for (const selector of sendButtonSelectors) {
-            const button = document.querySelector(selector);
-            if (button) {
-              sendButton = button;
-              break;
+            try {
+              const button = document.querySelector(selector);
+              if (button && !button.disabled) {
+                sendButton = button;
+                break;
+              }
+            } catch (e) {
+              continue;
             }
           }
 
@@ -160,7 +168,21 @@ function checkForResponse() {
     return;
   }
 
-  const messages = document.querySelectorAll(".f9bf7997");
+  const messageSelectors = [
+    "[data-testid='chat-message-assistant']",
+    "model-response",
+    ".ds-markdown",
+    ".f9bf7997",
+  ];
+
+  let messages = [];
+  for (const selector of messageSelectors) {
+    const foundMessages = document.querySelectorAll(selector);
+    if (foundMessages.length > 0) {
+      messages = Array.from(foundMessages);
+      break;
+    }
+  }
 
   if (messages.length <= messageCountAtQuestion) {
     return;
@@ -169,21 +191,45 @@ function checkForResponse() {
   const newMessages = Array.from(messages).slice(messageCountAtQuestion);
 
   for (const message of newMessages) {
-    const codeBlocks = message.querySelectorAll(".md-code-block");
+    const codeBlockSelectors = [
+      ".md-code-block pre",
+      "pre code",
+      "pre",
+      ".code-block pre",
+      ".ds-markdown pre",
+    ];
 
-    for (const block of codeBlocks) {
-      const infoString = block.querySelector(".md-code-block-infostring");
-      if (infoString && infoString.textContent.includes("json")) {
-        const preElement = block.querySelector("pre");
-        if (preElement) {
-          const responseText = preElement.textContent.trim();
-          if (processResponse(responseText)) return;
+    for (const selector of codeBlockSelectors) {
+      const codeBlocks = message.querySelectorAll(selector);
+
+      for (const block of codeBlocks) {
+        const parent = block.closest(
+          ".md-code-block, .code-block, .ds-markdown"
+        );
+
+        if (parent) {
+          const infoElements = parent.querySelectorAll(
+            '.d813de27, .md-code-block-infostring, [class*="json"], [class*="language"]'
+          );
+          const hasJsonInfo = Array.from(infoElements).some((el) =>
+            el.textContent.toLowerCase().includes("json")
+          );
+
+          if (hasJsonInfo || !infoElements.length) {
+            const responseText = block.textContent.trim();
+            if (
+              responseText.includes("{") &&
+              responseText.includes('"answer"')
+            ) {
+              if (processResponse(responseText)) return;
+            }
+          }
         }
       }
     }
 
     const messageText = message.textContent.trim();
-    const jsonMatch = messageText.match(/\{[\s\S]*\}/);
+    const jsonMatch = messageText.match(/\{[\s\S]*?"answer"[\s\S]*?\}/);
     if (jsonMatch) {
       const responseText = jsonMatch[0];
       if (processResponse(responseText)) return;
