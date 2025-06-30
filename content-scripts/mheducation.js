@@ -25,6 +25,28 @@ function setupMessageListener() {
   chrome.runtime.onMessage.addListener(messageListener);
 }
 
+function handleTopicOverview() {
+  const continueButton = document.querySelector(
+    "awd-topic-overview-button-bar .next-button, .button-bar-wrapper .next-button"
+  );
+
+  if (
+    continueButton &&
+    continueButton.textContent.trim().toLowerCase().includes("continue")
+  ) {
+    continueButton.click();
+
+    setTimeout(() => {
+      if (isAutomating) {
+        checkForNextStep();
+      }
+    }, 1000);
+
+    return true;
+  }
+  return false;
+}
+
 function handleForcedLearning() {
   const forcedLearningAlert = document.querySelector(
     ".forced-learning .alert-error"
@@ -45,16 +67,7 @@ function handleForcedLearning() {
           nextButton.click();
           if (isAutomating) {
             setTimeout(() => {
-              const container = document.querySelector(".probe-container");
-              if (container && !container.querySelector(".forced-learning")) {
-                const qData = parseQuestion();
-                if (qData) {
-                  chrome.runtime.sendMessage({
-                    type: "sendQuestionToChatGPT",
-                    question: qData,
-                  });
-                }
-              }
+              checkForNextStep();
             }, 1000);
           }
         })
@@ -66,6 +79,29 @@ function handleForcedLearning() {
     }
   }
   return false;
+}
+
+function checkForNextStep() {
+  if (!isAutomating) return;
+
+  if (handleTopicOverview()) {
+    return;
+  }
+
+  if (handleForcedLearning()) {
+    return;
+  }
+
+  const container = document.querySelector(".probe-container");
+  if (container && !container.querySelector(".forced-learning")) {
+    const qData = parseQuestion();
+    if (qData) {
+      chrome.runtime.sendMessage({
+        type: "sendQuestionToChatGPT",
+        question: qData,
+      });
+    }
+  }
 }
 
 function extractCorrectAnswer() {
@@ -232,6 +268,10 @@ function cleanAnswer(answer) {
 
 function processChatGPTResponse(responseText) {
   try {
+    if (handleTopicOverview()) {
+      return;
+    }
+
     if (handleForcedLearning()) {
       return;
     }
@@ -321,16 +361,7 @@ function processChatGPTResponse(responseText) {
               .then((nextButton) => {
                 nextButton.click();
                 setTimeout(() => {
-                  const container = document.querySelector(".probe-container");
-                  if (container && isAutomating) {
-                    const qData = parseQuestion();
-                    if (qData) {
-                      chrome.runtime.sendMessage({
-                        type: "sendQuestionToChatGPT",
-                        question: qData,
-                      });
-                    }
-                  }
+                  checkForNextStep();
                 }, 1000);
               })
               .catch((error) => {
@@ -392,13 +423,7 @@ function addAssistantButton() {
           if (proceed) {
             isAutomating = true;
             btn.textContent = "Stop Automation";
-            const qData = parseQuestion();
-            if (qData) {
-              chrome.runtime.sendMessage({
-                type: "sendQuestionToChatGPT",
-                question: qData,
-              });
-            }
+            checkForNextStep();
           }
         }
       });
@@ -534,3 +559,9 @@ function waitForElement(selector, timeout = 5000) {
 
 setupMessageListener();
 addAssistantButton();
+
+if (isAutomating) {
+  setTimeout(() => {
+    checkForNextStep();
+  }, 1000);
+}
