@@ -16,6 +16,12 @@
 
 ---
 
+## Compatibility Notice
+
+**⚠️ MacOS Users:** This extension may not work properly on MacOS due to platform-specific differences in Chrome extension behavior and system interactions. For the best experience, we recommend using this extension on Windows or Linux systems.
+
+---
+
 ## Installation
 
 1. Download the latest zip from the [releases page](https://github.com/GooglyBlox/auto-mcgraw/releases)
