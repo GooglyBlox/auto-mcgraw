@@ -2,6 +2,19 @@ let messageListener = null;
 let isAutomating = false;
 let lastIncorrectQuestion = null;
 let lastCorrectAnswer = null;
+let doubleCreditMode = false;
+let waitingForDuplicateCompletion = false;
+let currentResponse = null;
+
+chrome.storage.sync.get("doubleCreditMode", function (data) {
+  doubleCreditMode = data.doubleCreditMode || false;
+});
+
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.doubleCreditMode) {
+    doubleCreditMode = changes.doubleCreditMode.newValue;
+  }
+});
 
 function setupMessageListener() {
   if (messageListener) {
@@ -9,8 +22,35 @@ function setupMessageListener() {
   }
 
   messageListener = (message, sender, sendResponse) => {
+    if (message.type === "ping") {
+      const container = document.querySelector(".probe-container");
+      sendResponse({ received: true, ready: !!container });
+      return true;
+    }
+
     if (message.type === "processChatGPTResponse") {
-      processChatGPTResponse(message.response);
+      if (
+        doubleCreditMode &&
+        !message.isDuplicateTab &&
+        !waitingForDuplicateCompletion
+      ) {
+        currentResponse = message.response;
+        processDoubleCreditResponse(message.response);
+      } else {
+        processChatGPTResponse(message.response);
+      }
+      sendResponse({ received: true });
+      return true;
+    }
+
+    if (message.type === "processDuplicateTab") {
+      processDuplicateTabAnswering(message.response);
+      sendResponse({ received: true });
+      return true;
+    }
+
+    if (message.type === "completeDoubleCredit") {
+      completeDoubleCreditFlow();
       sendResponse({ received: true });
       return true;
     }
@@ -20,9 +60,217 @@ function setupMessageListener() {
       sendResponse({ received: true });
       return true;
     }
+
+    if (message.type === "stopAutomation") {
+      isAutomating = false;
+      updateButtonState();
+      sendResponse({ received: true });
+      return true;
+    }
   };
 
   chrome.runtime.onMessage.addListener(messageListener);
+}
+
+function updateButtonState() {
+  chrome.storage.sync.get(["aiModel", "doubleCreditMode"], function (data) {
+    const currentModel = data.aiModel || "chatgpt";
+    const doubleMode = data.doubleCreditMode || false;
+    let currentModelName = "ChatGPT";
+
+    if (currentModel === "gemini") {
+      currentModelName = "Gemini";
+    } else if (currentModel === "deepseek") {
+      currentModelName = "DeepSeek";
+    }
+
+    const btn = document.querySelector(".automcgraw-btn");
+    if (btn) {
+      btn.textContent = `Ask ${currentModelName}${doubleMode ? " (2x)" : ""}`;
+    }
+  });
+}
+
+function processDoubleCreditResponse(responseText) {
+  try {
+    if (handleTopicOverview()) return;
+    if (handleForcedLearning()) return;
+
+    const response = JSON.parse(responseText);
+    const answers = Array.isArray(response.answer)
+      ? response.answer
+      : [response.answer];
+
+    const container = document.querySelector(".probe-container");
+    if (!container) return;
+
+    if (container.querySelector(".awd-probe-type-matching")) {
+      alert(
+        "Matching questions are not supported in double credit mode. Please complete manually."
+      );
+      isAutomating = false;
+      updateButtonState();
+      return;
+    }
+
+    fillInAnswers(answers, container);
+
+    waitingForDuplicateCompletion = true;
+    chrome.runtime.sendMessage({ type: "createDuplicateTab" });
+  } catch (e) {
+    console.error("Error processing double credit response:", e);
+    isAutomating = false;
+    updateButtonState();
+  }
+}
+
+function processDuplicateTabAnswering(responseText) {
+  try {
+
+    const response = JSON.parse(responseText);
+    const answers = Array.isArray(response.answer)
+      ? response.answer
+      : [response.answer];
+
+
+    waitForElement(".probe-container", 5000)
+      .then((container) => {
+
+        setTimeout(() => {
+          fillInAnswers(answers, container);
+
+          waitForElement(
+            '[data-automation-id="confidence-buttons--high_confidence"]:not([disabled])',
+            3000
+          )
+            .then((button) => {
+              button.click();
+
+              setTimeout(() => {
+                chrome.runtime.sendMessage({ type: "finishDoubleCredit" });
+
+                setTimeout(() => {
+                  chrome.runtime.sendMessage({ type: "closeDuplicateTab" });
+                }, 300);
+              }, 800);
+            })
+            .catch((error) => {
+              console.error(
+                "Could not find high confidence button in duplicate tab:",
+                error
+              );
+            });
+        }, 500);
+      })
+      .catch((error) => {
+        console.error(
+          "Could not find probe container in duplicate tab:",
+          error
+        );
+      });
+  } catch (e) {
+    console.error("Error processing duplicate tab:", e);
+  }
+}
+
+function completeDoubleCreditFlow() {
+  waitingForDuplicateCompletion = false;
+
+  const container = document.querySelector(".probe-container");
+  if (!container) return;
+
+  waitForElement(
+    '[data-automation-id="confidence-buttons--high_confidence"]:not([disabled])',
+    3000
+  ).then((button) => {
+    button.click();
+
+    setTimeout(() => {
+      checkForCorrectAnswer(container);
+
+      waitForElement(".next-button", 5000)
+        .then((nextButton) => {
+          nextButton.click();
+
+          chrome.runtime.sendMessage({ type: "resetTabTracking" });
+
+          if (isAutomating) {
+            setTimeout(() => {
+              checkForNextStep();
+            }, 800);
+          }
+        })
+        .catch((error) => {
+          console.error("Automation error:", error);
+          isAutomating = false;
+          updateButtonState();
+        });
+    }, 800);
+  });
+}
+
+function fillInAnswers(answers, container) {
+
+  if (container.querySelector(".awd-probe-type-fill_in_the_blank")) {
+    const inputs = container.querySelectorAll("input.fitb-input");
+
+    inputs.forEach((input, index) => {
+      if (answers[index]) {
+        input.value = answers[index];
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+  } else {
+    const choices = container.querySelectorAll(
+      'input[type="radio"], input[type="checkbox"]'
+    );
+
+    choices.forEach((choice, index) => {
+      const label = choice.closest("label");
+      if (label) {
+        const choiceText = label
+          .querySelector(".choiceText")
+          ?.textContent.trim();
+
+        if (choiceText) {
+          const shouldBeSelected = answers.some((ans) => {
+            const match1 = choiceText === ans;
+            const choiceWithoutPeriod = choiceText.replace(/\.$/, "");
+            const answerWithoutPeriod = ans.replace(/\.$/, "");
+            const match2 = choiceWithoutPeriod === answerWithoutPeriod;
+            const match3 = choiceText === ans + ".";
+            const match4 = choiceText.includes(ans) || ans.includes(choiceText);
+
+            if (match1 || match2 || match3 || match4) {
+              return true;
+            }
+            return false;
+          });
+
+          if (shouldBeSelected) {
+            choice.click();
+          }
+        }
+      }
+    });
+  }
+}
+
+function checkForCorrectAnswer(container) {
+  const incorrectMarker = container.querySelector(
+    ".awd-probe-correctness.incorrect"
+  );
+  if (incorrectMarker) {
+    const correctionData = extractCorrectAnswer();
+    if (correctionData && correctionData.answer) {
+      lastIncorrectQuestion = correctionData.question;
+      lastCorrectAnswer = cleanAnswer(correctionData.answer);
+      console.log(
+        "Found incorrect answer. Correct answer is:",
+        lastCorrectAnswer
+      );
+    }
+  }
 }
 
 function handleTopicOverview() {
@@ -74,6 +322,7 @@ function handleForcedLearning() {
         .catch((error) => {
           console.error("Error in forced learning flow:", error);
           isAutomating = false;
+          updateButtonState();
         });
       return true;
     }
@@ -293,44 +542,8 @@ function processChatGPTResponse(responseText) {
           answers.join("\n") +
           "\n\nPlease input these matches manually, then click high confidence and next."
       );
-    } else if (container.querySelector(".awd-probe-type-fill_in_the_blank")) {
-      const inputs = container.querySelectorAll("input.fitb-input");
-      inputs.forEach((input, index) => {
-        if (answers[index]) {
-          input.value = answers[index];
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-        }
-      });
     } else {
-      const choices = container.querySelectorAll(
-        'input[type="radio"], input[type="checkbox"]'
-      );
-
-      choices.forEach((choice) => {
-        const label = choice.closest("label");
-        if (label) {
-          const choiceText = label
-            .querySelector(".choiceText")
-            ?.textContent.trim();
-          if (choiceText) {
-            const shouldBeSelected = answers.some((ans) => {
-              if (choiceText === ans) return true;
-
-              const choiceWithoutPeriod = choiceText.replace(/\.$/, "");
-              const answerWithoutPeriod = ans.replace(/\.$/, "");
-              if (choiceWithoutPeriod === answerWithoutPeriod) return true;
-
-              if (choiceText === ans + ".") return true;
-
-              return false;
-            });
-
-            if (shouldBeSelected) {
-              choice.click();
-            }
-          }
-        }
-      });
+      fillInAnswers(answers, container);
     }
 
     if (isAutomating) {
@@ -342,20 +555,7 @@ function processChatGPTResponse(responseText) {
           button.click();
 
           setTimeout(() => {
-            const incorrectMarker = container.querySelector(
-              ".awd-probe-correctness.incorrect"
-            );
-            if (incorrectMarker) {
-              const correctionData = extractCorrectAnswer();
-              if (correctionData && correctionData.answer) {
-                lastIncorrectQuestion = correctionData.question;
-                lastCorrectAnswer = cleanAnswer(correctionData.answer);
-                console.log(
-                  "Found incorrect answer. Correct answer is:",
-                  lastCorrectAnswer
-                );
-              }
-            }
+            checkForCorrectAnswer(container);
 
             waitForElement(".next-button", 10000)
               .then((nextButton) => {
@@ -367,12 +567,14 @@ function processChatGPTResponse(responseText) {
               .catch((error) => {
                 console.error("Automation error:", error);
                 isAutomating = false;
+                updateButtonState();
               });
           }, 1000);
         })
         .catch((error) => {
           console.error("Automation error:", error);
           isAutomating = false;
+          updateButtonState();
         });
     }
   } catch (e) {
@@ -386,8 +588,9 @@ function addAssistantButton() {
     buttonContainer.style.display = "flex";
     buttonContainer.style.marginLeft = "10px";
 
-    chrome.storage.sync.get("aiModel", function (data) {
+    chrome.storage.sync.get(["aiModel", "doubleCreditMode"], function (data) {
       const aiModel = data.aiModel || "chatgpt";
+      doubleCreditMode = data.doubleCreditMode || false;
       let modelName = "ChatGPT";
 
       if (aiModel === "gemini") {
@@ -397,28 +600,22 @@ function addAssistantButton() {
       }
 
       const btn = document.createElement("button");
-      btn.textContent = `Ask ${modelName}`;
-      btn.classList.add("btn", "btn-secondary");
+      btn.textContent = `Ask ${modelName}${doubleCreditMode ? " (2x)" : ""}`;
+      btn.classList.add("btn", "btn-secondary", "automcgraw-btn");
       btn.style.borderTopRightRadius = "0";
       btn.style.borderBottomRightRadius = "0";
       btn.addEventListener("click", () => {
         if (isAutomating) {
           isAutomating = false;
-          chrome.storage.sync.get("aiModel", function (data) {
-            const currentModel = data.aiModel || "chatgpt";
-            let currentModelName = "ChatGPT";
-
-            if (currentModel === "gemini") {
-              currentModelName = "Gemini";
-            } else if (currentModel === "deepseek") {
-              currentModelName = "DeepSeek";
-            }
-
-            btn.textContent = `Ask ${currentModelName}`;
-          });
+          waitingForDuplicateCompletion = false;
+          chrome.runtime.sendMessage({ type: "resetTabTracking" });
+          updateButtonState();
         } else {
+          const modeText = doubleCreditMode
+            ? " Double credit mode is enabled."
+            : "";
           const proceed = confirm(
-            "Start automated answering? Click OK to begin, or Cancel to stop."
+            `Start automated answering?${modeText} Click OK to begin, or Cancel to stop.`
           );
           if (proceed) {
             isAutomating = true;
@@ -450,19 +647,26 @@ function addAssistantButton() {
       headerNav.appendChild(buttonContainer);
 
       chrome.storage.onChanged.addListener((changes) => {
-        if (changes.aiModel) {
-          const newModel = changes.aiModel.newValue;
-          let newModelName = "ChatGPT";
+        if ((changes.aiModel || changes.doubleCreditMode) && !isAutomating) {
+          chrome.storage.sync.get(
+            ["aiModel", "doubleCreditMode"],
+            function (data) {
+              const newModel = data.aiModel || "chatgpt";
+              const doubleMode = data.doubleCreditMode || false;
+              doubleCreditMode = doubleMode;
+              let newModelName = "ChatGPT";
 
-          if (newModel === "gemini") {
-            newModelName = "Gemini";
-          } else if (newModel === "deepseek") {
-            newModelName = "DeepSeek";
-          }
+              if (newModel === "gemini") {
+                newModelName = "Gemini";
+              } else if (newModel === "deepseek") {
+                newModelName = "DeepSeek";
+              }
 
-          if (!isAutomating) {
-            btn.textContent = `Ask ${newModelName}`;
-          }
+              btn.textContent = `Ask ${newModelName}${
+                doubleMode ? " (2x)" : ""
+              }`;
+            }
+          );
         }
       });
     });

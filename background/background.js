@@ -5,6 +5,11 @@ let lastActiveTabId = null;
 let processingQuestion = false;
 let mheWindowId = null;
 let aiWindowId = null;
+let duplicateTabId = null;
+let originalTabId = null;
+let storedResponse = null;
+let isProcessingDuplicate = false;
+let pendingResponse = null;
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
   lastActiveTabId = activeInfo.tabId;
@@ -73,6 +78,8 @@ async function findAndStoreTabs() {
     if (tabs.length > 0) {
       aiTabId = tabs[0].id;
       aiWindowId = tabs[0].windowId;
+    } else {
+      aiTabId = null;
     }
   } else if (aiModel === "gemini") {
     const tabs = await chrome.tabs.query({
@@ -81,6 +88,8 @@ async function findAndStoreTabs() {
     if (tabs.length > 0) {
       aiTabId = tabs[0].id;
       aiWindowId = tabs[0].windowId;
+    } else {
+      aiTabId = null;
     }
   } else if (aiModel === "deepseek") {
     const tabs = await chrome.tabs.query({
@@ -89,6 +98,8 @@ async function findAndStoreTabs() {
     if (tabs.length > 0) {
       aiTabId = tabs[0].id;
       aiWindowId = tabs[0].windowId;
+    } else {
+      aiTabId = null;
     }
   }
 }
@@ -109,6 +120,9 @@ async function processQuestion(message) {
       await sendMessageWithRetry(mheTabId, {
         type: "alertMessage",
         message: `Please open ${aiType} in another tab before using automation.`,
+      });
+      await sendMessageWithRetry(mheTabId, {
+        type: "stopAutomation",
       });
       processingQuestion = false;
       return;
@@ -141,6 +155,9 @@ async function processQuestion(message) {
         type: "alertMessage",
         message: `Error communicating with ${aiType}. Please make sure it's open in another tab.`,
       });
+      await sendMessageWithRetry(mheTabId, {
+        type: "stopAutomation",
+      });
     }
   } finally {
     processingQuestion = false;
@@ -149,6 +166,27 @@ async function processQuestion(message) {
 
 async function processResponse(message) {
   try {
+    pendingResponse = message.response;
+
+    if (duplicateTabId && isProcessingDuplicate) {
+      await sendMessageWithRetry(duplicateTabId, {
+        type: "processChatGPTResponse",
+        response: message.response,
+        isDuplicateTab: true,
+      });
+      return;
+    }
+
+    if (originalTabId) {
+      storedResponse = message.response;
+      await sendMessageWithRetry(originalTabId, {
+        type: "processChatGPTResponse",
+        response: message.response,
+        isDuplicateTab: false,
+      });
+      return;
+    }
+
     if (!mheTabId) {
       const mheTabs = await chrome.tabs.query({
         url: [
@@ -180,6 +218,26 @@ async function processResponse(message) {
   }
 }
 
+async function waitForTabReady(tabId, maxAttempts = 8) {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      await chrome.tabs.get(tabId);
+
+      await sendMessageWithRetry(tabId, { type: "ping" }, 1, 300);
+
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.status === "complete") {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return true;
+      }
+    } catch (error) {
+      console.log(`Tab ${tabId} not ready, attempt ${i + 1}:`, error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.tab) {
     message.sourceTabId = sender.tab.id;
@@ -188,8 +246,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sender.tab.url.includes("learning.mheducation.com") ||
       sender.tab.url.includes("ezto.mheducation.com")
     ) {
-      mheTabId = sender.tab.id;
-      mheWindowId = sender.tab.windowId;
+      if (!originalTabId && !duplicateTabId) {
+        mheTabId = sender.tab.id;
+        mheWindowId = sender.tab.windowId;
+      }
     } else if (sender.tab.url.includes("chatgpt.com")) {
       aiTabId = sender.tab.id;
       aiWindowId = sender.tab.windowId;
@@ -203,6 +263,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       aiWindowId = sender.tab.windowId;
       aiType = "deepseek";
     }
+  }
+
+  if (message.type === "ping") {
+    sendResponse({ received: true });
+    return true;
   }
 
   if (message.type === "sendQuestionToChatGPT") {
@@ -221,12 +286,73 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "createDuplicateTab") {
+    originalTabId = sender.tab.id;
+    storedResponse = pendingResponse;
+
+    chrome.tabs.duplicate(sender.tab.id, async (newTab) => {
+      duplicateTabId = newTab.id;
+
+      const isReady = await waitForTabReady(duplicateTabId);
+
+      if (isReady) {
+        try {
+          await sendMessageWithRetry(duplicateTabId, {
+            type: "processDuplicateTab",
+            response: storedResponse,
+          });
+        } catch (error) {
+          console.error("Error sending message to duplicate tab:", error);
+        }
+      } else {
+        console.error("Duplicate tab failed to become ready");
+      }
+    });
+    sendResponse({ received: true });
+    return true;
+  }
+
+  if (message.type === "closeDuplicateTab") {
+    if (duplicateTabId) {
+      if (originalTabId) {
+        focusTab(originalTabId);
+      }
+
+      chrome.tabs.remove(duplicateTabId, () => {
+        duplicateTabId = null;
+        isProcessingDuplicate = false;
+      });
+    }
+    sendResponse({ received: true });
+    return true;
+  }
+
+  if (message.type === "finishDoubleCredit") {
+    if (originalTabId) {
+      sendMessageWithRetry(originalTabId, {
+        type: "completeDoubleCredit",
+      });
+    }
+    sendResponse({ received: true });
+    return true;
+  }
+
+  if (message.type === "resetTabTracking") {
+    duplicateTabId = null;
+    originalTabId = null;
+    storedResponse = null;
+    isProcessingDuplicate = false;
+    pendingResponse = null;
+    sendResponse({ received: true });
+    return true;
+  }
+
   if (message.type === "openSettings") {
     chrome.windows.create({
       url: chrome.runtime.getURL("popup/settings.html"),
       type: "popup",
       width: 500,
-      height: 520,
+      height: 600,
     });
     sendResponse({ received: true });
     return true;
@@ -241,4 +367,12 @@ findAndStoreTabs();
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === mheTabId) mheTabId = null;
   if (tabId === aiTabId) aiTabId = null;
+  if (tabId === duplicateTabId) {
+    duplicateTabId = null;
+    isProcessingDuplicate = false;
+  }
+  if (tabId === originalTabId) {
+    originalTabId = null;
+    storedResponse = null;
+  }
 });

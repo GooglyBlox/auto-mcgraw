@@ -65,6 +65,16 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  const doubleCreditToggle = document.getElementById("double-credit-toggle");
+
+  chrome.storage.sync.get("doubleCreditMode", function (data) {
+    doubleCreditToggle.checked = data.doubleCreditMode || false;
+  });
+
+  doubleCreditToggle.addEventListener("change", function () {
+    chrome.storage.sync.set({ doubleCreditMode: this.checked });
+  });
+
   function checkModelAvailability(currentModel) {
     statusMessage.textContent = "Checking assistant availability...";
     statusMessage.className = "";

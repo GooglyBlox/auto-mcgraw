@@ -98,7 +98,6 @@ function stopAutomation(reason = "Quiz completed") {
   });
 
   alert(`Automation stopped: ${reason}`);
-  console.log(`Automation stopped: ${reason}`);
 }
 
 function checkForNextStep() {
@@ -140,7 +139,6 @@ function parseQuestion() {
     questionType = "fill_in_the_blank";
     options = [];
   } else {
-    console.log("Unknown question type");
     return null;
   }
 
@@ -182,7 +180,6 @@ function parseQuestion() {
 
 function processChatGPTResponse(responseText) {
   try {
-    console.log("Quiz response received:", responseText);
 
     const response = JSON.parse(responseText);
     const answer = response.answer;
@@ -240,35 +237,28 @@ function handleMultipleChoiceAnswer(answer) {
       answer.includes(labelText)
     ) {
       radioButtons[i].click();
-      console.log("Selected option:", labelText);
       break;
     }
   }
 }
 
 function handleTrueFalseAnswer(answer) {
-  console.log("Handling true/false answer:", answer);
   const buttons = document.querySelectorAll(".answer--boolean");
-  console.log("Found buttons:", buttons.length);
 
   for (const button of buttons) {
     const buttonSpan = button.querySelector(".answer__button--boolean");
     if (!buttonSpan) {
-      console.log("No .answer__button--boolean found in button");
       continue;
     }
     
     const fullText = buttonSpan.textContent;
-    console.log("Button full text:", JSON.stringify(fullText));
     
     const buttonText = fullText.trim().split(",")[0].trim();
-    console.log("Parsed button text:", JSON.stringify(buttonText));
 
     if (
       (buttonText === "True" && (answer === "True" || answer === true)) ||
       (buttonText === "False" && (answer === "False" || answer === false))
     ) {
-      console.log("Clicking button with text:", buttonText);
       button.click();
       return;
     }
@@ -293,7 +283,6 @@ function handleFillInTheBlankAnswer(answer) {
     inputField.dispatchEvent(new Event("input", { bubbles: true }));
     inputField.dispatchEvent(new Event("change", { bubbles: true }));
 
-    console.log("Filled in blank with:", answerText);
   } else {
     console.error("Could not find input field for fill in the blank");
   }
