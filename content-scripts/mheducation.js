@@ -600,6 +600,157 @@ function cleanAnswer(answer) {
   return answer;
 }
 
+function tryParseAnswerArrayString(value) {
+  if (typeof value !== "string") return null;
+
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function flattenAnswerValues(value, output = []) {
+  if (value === null || value === undefined) {
+    return output;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => flattenAnswerValues(item, output));
+    return output;
+  }
+
+  if (typeof value === "string") {
+    const parsedArray = tryParseAnswerArrayString(value);
+    if (parsedArray) {
+      flattenAnswerValues(parsedArray, output);
+      return output;
+    }
+
+    const trimmed = value.trim();
+    if (trimmed) {
+      output.push(trimmed);
+    }
+    return output;
+  }
+
+  output.push(String(value));
+  return output;
+}
+
+function splitCompoundAnswer(answerText) {
+  if (typeof answerText !== "string") return [];
+
+  const trimmed = answerText.trim();
+  if (!trimmed) return [];
+
+  let parts = trimmed
+    .split(/\n|;|,/)
+    .map((part) =>
+      part
+        .trim()
+        .replace(/^[-*•]\s*/, "")
+        .replace(/^\d+[\).\-\s]+/, "")
+        .replace(/^["'`]|["'`]$/g, "")
+        .trim()
+    )
+    .filter(Boolean);
+
+  if (parts.length <= 1 && /\band\b/i.test(trimmed)) {
+    parts = trimmed
+      .split(/\band\b/i)
+      .map((part) =>
+        part
+          .trim()
+          .replace(/^[-*•]\s*/, "")
+          .replace(/^\d+[\).\-\s]+/, "")
+          .replace(/^["'`]|["'`]$/g, "")
+          .trim()
+      )
+      .filter(Boolean);
+  }
+
+  return parts;
+}
+
+function dedupeAnswers(answers) {
+  const seen = new Set();
+  const deduped = [];
+
+  answers.forEach((answer) => {
+    const normalized = normalizeChoiceText(answer).toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    deduped.push(answer);
+  });
+
+  return deduped;
+}
+
+function getQuestionChoices(container, questionType) {
+  if (questionType === "select_text") {
+    return Array.from(
+      container.querySelectorAll(".select-text-component .choice.-interactive")
+    )
+      .map((el) => el.textContent.trim())
+      .filter(Boolean);
+  }
+
+  return Array.from(container.querySelectorAll(".choiceText"))
+    .map((el) => el.textContent.trim())
+    .filter(Boolean);
+}
+
+function extractChoicesFromCombinedAnswer(answerText, questionChoices) {
+  if (typeof answerText !== "string" || questionChoices.length === 0) {
+    return [];
+  }
+
+  const normalizedAnswer = normalizeChoiceText(answerText).toLowerCase();
+  if (!normalizedAnswer) return [];
+
+  return questionChoices.filter((choice) => {
+    const normalizedChoice = normalizeChoiceText(choice).toLowerCase();
+    return normalizedChoice && normalizedAnswer.includes(normalizedChoice);
+  });
+}
+
+function normalizeResponseAnswers(rawAnswer, questionType, container) {
+  const flattenedAnswers = flattenAnswerValues(rawAnswer);
+  if (flattenedAnswers.length === 0) return [];
+
+  const isMultiChoiceType =
+    questionType === "multiple_select" || questionType === "select_text";
+
+  if (isMultiChoiceType && flattenedAnswers.length === 1) {
+    const combinedAnswer = flattenedAnswers[0];
+    const questionChoices = getQuestionChoices(container, questionType);
+    const extractedChoices = extractChoicesFromCombinedAnswer(
+      combinedAnswer,
+      questionChoices
+    );
+
+    if (extractedChoices.length > 0) {
+      return dedupeAnswers(extractedChoices);
+    }
+
+    const splitAnswers = splitCompoundAnswer(combinedAnswer);
+    if (splitAnswers.length > 1) {
+      return dedupeAnswers(splitAnswers);
+    }
+  }
+
+  return dedupeAnswers(flattenedAnswers);
+}
+
 function processChatGPTResponse(responseText) {
   try {
     if (handleTopicOverview()) {
@@ -610,16 +761,15 @@ function processChatGPTResponse(responseText) {
       return;
     }
 
-    const response = JSON.parse(responseText);
-    const answers = (Array.isArray(response.answer)
-      ? response.answer
-      : [response.answer]
-    )
-      .map((ans) => (ans === null || ans === undefined ? "" : String(ans)))
-      .filter(Boolean);
-
     const container = document.querySelector(".probe-container");
     if (!container) return;
+    const questionType = detectQuestionType(container);
+    const response = JSON.parse(responseText);
+    const answers = normalizeResponseAnswers(
+      response.answer,
+      questionType,
+      container
+    );
 
     lastIncorrectQuestion = null;
     lastCorrectAnswer = null;
