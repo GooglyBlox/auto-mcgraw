@@ -8,6 +8,7 @@
     "https://learning.mheducation.com/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
+    "https://chat.deepseek.com/*",
     "https://deepseek.chat/*"
   ],
   "background": {
