@@ -43,8 +43,8 @@
    - Sends questions to your chosen AI assistant
    - Processes the responses
    - Automatically fills in answers
-   - Handles multiple choice, true/false, and fill-in-the-blank questions
-      - **Note about matching questions:** Due to technical limitations, matching questions cannot be automated. When encountering a matching question, the extension will show you AI-suggested matches in an alert. You'll need to manually drag and drop the matches, then the extension will continue with automation.
+   - Handles multiple choice, true/false, fill-in-the-blank, ordering, and matching questions
+      - **Note about matching questions:** Matching questions now attempt full automation. If a strict, reliable match cannot be completed, the extension will show AI-suggested matches in an alert, pause, and let you finish manually before resuming on the next question.
    - Navigates through forced learning sections when needed
 
 Click "Stop Automation" at any time to pause the process.

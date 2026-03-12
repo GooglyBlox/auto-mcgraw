@@ -8,6 +8,7 @@ let pauseBeforeSubmit = false;
 let waitingForDuplicateCompletion = false;
 let currentResponse = null;
 let matchingPauseIntervalId = null;
+const LOG_PREFIX = "[Auto-McGraw][mhe]";
 
 chrome.storage.sync.get(["doubleCreditMode", "randomConfidence", "pauseBeforeSubmit"], function (data) {
   doubleCreditMode = data.doubleCreditMode || false;
@@ -766,7 +767,1050 @@ function getQuestionChoices(container, questionType) {
     .map((el) => el.textContent.trim())
     .filter(Boolean);
 }
+function getOrderingChoiceItems(container) {
+  if (!container) return [];
 
+  return Array.from(
+    container.querySelectorAll(
+      ".sortable-component .responses-container .choice-item, .sortable-component .choice-item"
+    )
+  );
+}
+
+function getOrderingChoiceText(choiceItem) {
+  if (!choiceItem) return "";
+
+  const contentEl =
+    choiceItem.querySelector(".content") || choiceItem.querySelector("p");
+  const rawText = contentEl ? contentEl.textContent : choiceItem.textContent;
+  return normalizeChoiceText(rawText || "");
+}
+
+function getOrderingDragHandle(choiceItem) {
+  if (!choiceItem) return null;
+
+  if (choiceItem.matches?.("[data-react-beautiful-dnd-drag-handle]")) {
+    return choiceItem;
+  }
+
+  return (
+    choiceItem.querySelector("[data-react-beautiful-dnd-drag-handle]") ||
+    choiceItem
+  );
+}
+
+function parseOrderingAnswerReference(answerText, choiceTexts) {
+  const normalizedAnswer = normalizeChoiceText(answerText);
+  if (!normalizedAnswer) return "";
+
+  const numericMatch = normalizedAnswer.match(/^choice\s*(\d+)$/i);
+  const simpleNumericMatch = numericMatch
+    ? numericMatch
+    : normalizedAnswer.match(/^(\d+)$/);
+  if (simpleNumericMatch) {
+    const index = Number(simpleNumericMatch[1]) - 1;
+    if (Number.isInteger(index) && index >= 0 && index < choiceTexts.length) {
+      return choiceTexts[index];
+    }
+  }
+
+  return normalizedAnswer;
+}
+
+function createKeyboardEvent(type, key, code, keyCode) {
+  const event = new KeyboardEvent(type, {
+    key,
+    code,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    keyCode,
+    which: keyCode,
+    charCode: keyCode,
+  });
+
+  try {
+    Object.defineProperty(event, "keyCode", {
+      get: () => keyCode,
+    });
+    Object.defineProperty(event, "which", {
+      get: () => keyCode,
+    });
+  } catch (e) {
+    // Ignore readonly property overrides in environments that block it.
+  }
+
+  return event;
+}
+
+function dispatchKeyboardSequence(target, key, code, keyCode) {
+  if (!target) return;
+
+  const keyDown = createKeyboardEvent("keydown", key, code, keyCode);
+  const keyUp = createKeyboardEvent("keyup", key, code, keyCode);
+  target.dispatchEvent(keyDown);
+  target.dispatchEvent(keyUp);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function findOrderingChoiceIndex(choiceItems, answerText, startIndex = 0) {
+  for (let index = startIndex; index < choiceItems.length; index += 1) {
+    const choiceText = getOrderingChoiceText(choiceItems[index]);
+    if (isAnswerMatch(choiceText, answerText)) {
+      return index;
+    }
+  }
+
+  const normalizedAnswer = normalizeChoiceText(answerText).toLowerCase();
+  if (!normalizedAnswer) return -1;
+
+  for (let index = startIndex; index < choiceItems.length; index += 1) {
+    const normalizedChoice = getOrderingChoiceText(choiceItems[index]).toLowerCase();
+    if (
+      normalizedChoice &&
+      (normalizedChoice.includes(normalizedAnswer) ||
+        normalizedAnswer.includes(normalizedChoice))
+    ) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+async function moveOrderingChoiceToIndex(
+  container,
+  choiceItem,
+  targetIndex,
+  liftConfig = { key: " ", code: "Space", keyCode: 32 }
+) {
+  if (!container || !choiceItem || !container.contains(choiceItem)) {
+    return false;
+  }
+
+  const movingText = getOrderingChoiceText(choiceItem);
+  if (!movingText) {
+    return false;
+  }
+
+  const getCurrentIndex = () =>
+    getOrderingChoiceItems(container).findIndex((item) =>
+      isAnswerMatch(getOrderingChoiceText(item), movingText)
+    );
+
+  const focusCurrentHandle = () => {
+    const currentItems = getOrderingChoiceItems(container);
+    const currentIndex = currentItems.findIndex((item) =>
+      isAnswerMatch(getOrderingChoiceText(item), movingText)
+    );
+    if (currentIndex < 0) return null;
+
+    const handle = getOrderingDragHandle(currentItems[currentIndex]);
+    if (!handle) return null;
+
+    if (typeof handle.focus === "function") {
+      try {
+        handle.focus({ preventScroll: true });
+      } catch (e) {
+        handle.focus();
+      }
+    }
+
+    return handle;
+  };
+
+  const initialHandle = focusCurrentHandle();
+  if (!initialHandle) {
+    return false;
+  }
+  await delay(40);
+
+  dispatchKeyboardSequence(
+    initialHandle,
+    liftConfig.key,
+    liftConfig.code,
+    liftConfig.keyCode
+  );
+  await delay(80);
+
+  const maxMoves = 60;
+  let moveCount = 0;
+  let stagnantMoves = 0;
+  while (moveCount < maxMoves) {
+    const currentIndex = getCurrentIndex();
+    if (currentIndex < 0 || currentIndex === targetIndex) {
+      break;
+    }
+
+    const handle = focusCurrentHandle();
+    if (!handle) {
+      break;
+    }
+
+    if (currentIndex > targetIndex) {
+      dispatchKeyboardSequence(handle, "ArrowUp", "ArrowUp", 38);
+    } else {
+      dispatchKeyboardSequence(handle, "ArrowDown", "ArrowDown", 40);
+    }
+
+    moveCount += 1;
+    await delay(60);
+
+    const nextIndex = getCurrentIndex();
+    if (nextIndex === currentIndex) {
+      stagnantMoves += 1;
+      if (stagnantMoves >= 3) {
+        break;
+      }
+    } else {
+      stagnantMoves = 0;
+    }
+  }
+
+  const dropHandle = focusCurrentHandle() || initialHandle;
+  dispatchKeyboardSequence(
+    dropHandle,
+    liftConfig.key,
+    liftConfig.code,
+    liftConfig.keyCode
+  );
+  await delay(80);
+
+  return getCurrentIndex() === targetIndex;
+}
+
+function isOrderingAligned(container, targetAnswers) {
+  if (!container || !Array.isArray(targetAnswers) || targetAnswers.length === 0) {
+    return false;
+  }
+
+  const currentOrder = getOrderingChoiceItems(container).map((item) =>
+    getOrderingChoiceText(item)
+  );
+
+  const compareCount = Math.min(targetAnswers.length, currentOrder.length);
+  for (let index = 0; index < compareCount; index += 1) {
+    if (!isAnswerMatch(currentOrder[index], targetAnswers[index])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function getOrderingSnapshot(container) {
+  return getOrderingChoiceItems(container)
+    .map((item) => getOrderingChoiceText(item))
+    .filter(Boolean);
+}
+
+async function applyOrderingAnswer(container, rawAnswers) {
+  const choiceItems = getOrderingChoiceItems(container);
+  if (!choiceItems.length) {
+    console.warn(LOG_PREFIX, "Ordering question detected but no sortable choices found");
+    return false;
+  }
+
+  const choiceTexts = choiceItems.map((item) => getOrderingChoiceText(item));
+  const targetAnswers = rawAnswers
+    .map((answer) => parseOrderingAnswerReference(answer, choiceTexts))
+    .filter(Boolean);
+
+  if (!targetAnswers.length) {
+    console.warn(LOG_PREFIX, "Ordering question had no usable answers from AI");
+    return false;
+  }
+
+  const reorderCount = Math.min(targetAnswers.length, choiceItems.length);
+  const expectedOrder = targetAnswers.slice(0, reorderCount);
+  console.info(LOG_PREFIX, "Ordering target sequence", expectedOrder);
+  const liftStrategies = [
+    { key: " ", code: "Space", keyCode: 32, label: "space" },
+    { key: "Enter", code: "Enter", keyCode: 13, label: "enter" },
+  ];
+
+  const maxPasses = 3;
+  for (let pass = 1; pass <= maxPasses; pass += 1) {
+    if (isOrderingAligned(container, expectedOrder)) {
+      return true;
+    }
+
+    for (let targetIndex = 0; targetIndex < reorderCount; targetIndex += 1) {
+      const currentItems = getOrderingChoiceItems(container);
+      const answerText = expectedOrder[targetIndex];
+      const sourceIndex = findOrderingChoiceIndex(
+        currentItems,
+        answerText,
+        targetIndex
+      );
+
+      if (sourceIndex < 0) {
+        console.warn(LOG_PREFIX, "Unable to match ordering answer:", answerText);
+        continue;
+      }
+
+      if (sourceIndex === targetIndex) {
+        continue;
+      }
+
+      let moved = false;
+      for (const strategy of liftStrategies) {
+        const strategyItems = getOrderingChoiceItems(container);
+        const strategySourceIndex = findOrderingChoiceIndex(
+          strategyItems,
+          answerText,
+          targetIndex
+        );
+        if (strategySourceIndex < 0) {
+          break;
+        }
+
+        moved = await moveOrderingChoiceToIndex(
+          container,
+          strategyItems[strategySourceIndex],
+          targetIndex,
+          strategy
+        );
+        if (moved) {
+          break;
+        }
+      }
+
+      if (!moved) {
+        console.warn(
+          LOG_PREFIX,
+          "Ordering move may not have completed:",
+          answerText,
+          "->",
+          targetIndex + 1,
+          "current order:",
+          getOrderingSnapshot(container)
+        );
+      }
+    }
+
+    if (!isOrderingAligned(container, expectedOrder)) {
+      console.info(
+        LOG_PREFIX,
+        `Ordering pass ${pass} incomplete`,
+        getOrderingSnapshot(container)
+      );
+    }
+  }
+
+  return isOrderingAligned(container, expectedOrder);
+}
+
+function getMatchingComponent(container) {
+  if (!container) return null;
+  return container.querySelector(".matching-component");
+}
+
+function getMatchingRows(container) {
+  const matchingComponent = getMatchingComponent(container);
+  if (!matchingComponent) return [];
+
+  return Array.from(
+    matchingComponent.querySelectorAll(".responses-container .match-row")
+  );
+}
+
+function getMatchingPromptText(matchRow) {
+  if (!matchRow) return "";
+  const promptContent =
+    matchRow.querySelector(".match-prompt .content") ||
+    matchRow.querySelector(".match-prompt");
+  const rawText = promptContent ? promptContent.textContent : "";
+  return normalizeChoiceText(rawText || "");
+}
+
+function getMatchingChoiceText(choiceItem) {
+  if (!choiceItem) return "";
+
+  const contentEl =
+    choiceItem.querySelector(".content") || choiceItem.querySelector("p");
+  const rawText = contentEl ? contentEl.textContent : choiceItem.textContent;
+  return normalizeChoiceText(rawText || "");
+}
+
+function getMatchingChoiceItems(container) {
+  const matchingComponent = getMatchingComponent(container);
+  if (!matchingComponent) return [];
+
+  return Array.from(
+    matchingComponent.querySelectorAll(
+      '.choice-item-wrapper[id^="choices:"]:not(.-placeholder)'
+    )
+  );
+}
+
+function getMatchingDragHandle(choiceItem) {
+  if (!choiceItem) return null;
+
+  if (choiceItem.matches?.("[data-react-beautiful-dnd-drag-handle]")) {
+    return choiceItem;
+  }
+
+  return (
+    choiceItem.querySelector("[data-react-beautiful-dnd-drag-handle]") ||
+    choiceItem
+  );
+}
+
+function getMatchingPoolChoiceItems(container) {
+  const matchingComponent = getMatchingComponent(container);
+  if (!matchingComponent) return [];
+
+  return Array.from(
+    matchingComponent.querySelectorAll(
+      '.choices-container .choice-item-wrapper[id^="choices:"]:not(.-placeholder)'
+    )
+  );
+}
+
+function getMatchingRowChoiceItem(matchRow) {
+  if (!matchRow) return null;
+
+  return matchRow.querySelector(
+    '.match-single-response-wrapper .choice-item-wrapper[id^="choices:"]:not(.-placeholder)'
+  );
+}
+
+function getMatchingChoiceLocation(container, choiceText) {
+  if (!container || !choiceText) {
+    return null;
+  }
+
+  const rows = getMatchingRows(container);
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const rowChoiceItem = getMatchingRowChoiceItem(rows[rowIndex]);
+    if (!rowChoiceItem) continue;
+
+    const rowChoiceText = getMatchingChoiceText(rowChoiceItem);
+    if (isAnswerMatch(rowChoiceText, choiceText)) {
+      return {
+        area: "row",
+        rowIndex,
+        poolIndex: -1,
+        item: rowChoiceItem,
+      };
+    }
+  }
+
+  const poolItems = getMatchingPoolChoiceItems(container);
+  for (let poolIndex = 0; poolIndex < poolItems.length; poolIndex += 1) {
+    const poolChoiceText = getMatchingChoiceText(poolItems[poolIndex]);
+    if (isAnswerMatch(poolChoiceText, choiceText)) {
+      return {
+        area: "pool",
+        rowIndex: -1,
+        poolIndex,
+        item: poolItems[poolIndex],
+      };
+    }
+  }
+
+  return null;
+}
+
+function parseMatchingAnswerReference(referenceText, candidateTexts, label = "") {
+  if (!candidateTexts || candidateTexts.length === 0) return "";
+
+  const normalizedReference = normalizeChoiceText(String(referenceText || ""));
+  if (!normalizedReference) return "";
+
+  const parseNumericReference = (value) => {
+    const match = value.match(/^#?(\d+)$/);
+    if (!match) return "";
+
+    const index = Number(match[1]) - 1;
+    if (Number.isInteger(index) && index >= 0 && index < candidateTexts.length) {
+      return candidateTexts[index];
+    }
+
+    return "";
+  };
+
+  let resolved = parseNumericReference(normalizedReference);
+  if (resolved) return resolved;
+
+  const promptPrefixes = /^(?:prompt|row|left)\s*#?\s*/i;
+  const choicePrefixes = /^(?:choice|option|item|right|match)\s*#?\s*/i;
+  const prefixRegex = label === "prompt" ? promptPrefixes : choicePrefixes;
+  const strippedReference = normalizedReference.replace(prefixRegex, "").trim();
+
+  resolved = parseNumericReference(strippedReference);
+  if (resolved) return resolved;
+
+  const exactMatch = candidateTexts.find((candidate) =>
+    isAnswerMatch(candidate, strippedReference)
+  );
+  if (exactMatch) return exactMatch;
+
+  const normalizedTarget = normalizeChoiceText(strippedReference).toLowerCase();
+  if (!normalizedTarget) return "";
+
+  const normalizedCandidateMatch = candidateTexts.find((candidate) => {
+    return normalizeChoiceText(candidate).toLowerCase() === normalizedTarget;
+  });
+  if (normalizedCandidateMatch) return normalizedCandidateMatch;
+
+  const partialMatch = candidateTexts.find((candidate) => {
+    const normalizedCandidate = normalizeChoiceText(candidate).toLowerCase();
+    return (
+      normalizedCandidate &&
+      (normalizedCandidate.includes(normalizedTarget) ||
+        normalizedTarget.includes(normalizedCandidate))
+    );
+  });
+
+  return partialMatch || "";
+}
+
+function splitMatchingAnswerSegments(answerText) {
+  if (typeof answerText !== "string") return [];
+
+  const initialSegments = answerText
+    .split(/\n|;/)
+    .map((segment) =>
+      segment
+        .trim()
+        .replace(/^[-*•]\s*/, "")
+        .replace(/^["'`]|["'`]$/g, "")
+        .trim()
+    )
+    .filter(Boolean);
+
+  const expandedSegments = [];
+  initialSegments.forEach((segment) => {
+    const delimiterCount = (segment.match(/->|=>|:/g) || []).length;
+    if (segment.includes(",") && delimiterCount > 1) {
+      segment
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .forEach((part) => expandedSegments.push(part));
+      return;
+    }
+
+    expandedSegments.push(segment);
+  });
+
+  return expandedSegments;
+}
+
+function parseMatchingPairString(answerText) {
+  if (typeof answerText !== "string") return null;
+
+  let cleanedText = answerText
+    .trim()
+    .replace(/^[-*•]\s*/, "")
+    .replace(/^["'`]|["'`]$/g, "")
+    .trim();
+  if (!/(?:->|=>|:)/.test(cleanedText)) {
+    cleanedText = cleanedText.replace(/^\d+[\.)]\s+/, "").trim();
+  }
+  if (!cleanedText) return null;
+
+  const arrowMatch = cleanedText.match(/^(.*?)\s*(?:->|=>)\s*(.+)$/);
+  if (arrowMatch) {
+    return {
+      promptRef: arrowMatch[1].trim(),
+      choiceRef: arrowMatch[2].trim(),
+    };
+  }
+
+  const colonMatch = cleanedText.match(/^(.*?)\s*:\s*(.+)$/);
+  if (colonMatch) {
+    return {
+      promptRef: colonMatch[1].trim(),
+      choiceRef: colonMatch[2].trim(),
+    };
+  }
+
+  return null;
+}
+
+function collectMatchingAnswerEntries(rawAnswer, output) {
+  if (!output || rawAnswer === null || rawAnswer === undefined) {
+    return;
+  }
+
+  if (Array.isArray(rawAnswer)) {
+    rawAnswer.forEach((entry) => collectMatchingAnswerEntries(entry, output));
+    return;
+  }
+
+  if (typeof rawAnswer === "object") {
+    const promptCandidate =
+      rawAnswer.prompt ??
+      rawAnswer.left ??
+      rawAnswer.source ??
+      rawAnswer.from ??
+      rawAnswer.key;
+    const choiceCandidate =
+      rawAnswer.choice ??
+      rawAnswer.match ??
+      rawAnswer.right ??
+      rawAnswer.target ??
+      rawAnswer.to ??
+      rawAnswer.answer ??
+      rawAnswer.value;
+
+    if (promptCandidate !== undefined && choiceCandidate !== undefined) {
+      output.pairs.push({
+        promptRef: String(promptCandidate),
+        choiceRef: String(choiceCandidate),
+      });
+      return;
+    }
+
+    Object.entries(rawAnswer).forEach(([promptRef, choiceRef]) => {
+      output.pairs.push({
+        promptRef: String(promptRef),
+        choiceRef: String(choiceRef),
+      });
+    });
+    return;
+  }
+
+  if (typeof rawAnswer === "string") {
+    const parsedArray = tryParseAnswerArrayString(rawAnswer);
+    if (parsedArray) {
+      collectMatchingAnswerEntries(parsedArray, output);
+      return;
+    }
+
+    const segments = splitMatchingAnswerSegments(rawAnswer);
+    if (!segments.length) {
+      const cleaned = normalizeChoiceText(rawAnswer);
+      if (cleaned) {
+        output.rawStrings.push(cleaned);
+        output.sequentialChoices.push(cleaned);
+      }
+      return;
+    }
+
+    segments.forEach((segment) => {
+      const pair = parseMatchingPairString(segment);
+      if (pair) {
+        output.pairs.push(pair);
+      } else {
+        const cleanedSegment = normalizeChoiceText(segment);
+        if (cleanedSegment) {
+          output.rawStrings.push(cleanedSegment);
+          output.sequentialChoices.push(cleanedSegment);
+        }
+      }
+    });
+    return;
+  }
+
+  const normalizedPrimitive = normalizeChoiceText(String(rawAnswer));
+  if (normalizedPrimitive) {
+    output.rawStrings.push(normalizedPrimitive);
+    output.sequentialChoices.push(normalizedPrimitive);
+  }
+}
+
+function normalizeMatchingTargets(container, rawAnswer) {
+  const rows = getMatchingRows(container);
+  if (!rows.length) return [];
+
+  const prompts = rows.map((row) => getMatchingPromptText(row));
+  const choiceTexts = dedupeAnswers(
+    getMatchingChoiceItems(container)
+      .map((item) => getMatchingChoiceText(item))
+      .filter(Boolean)
+  );
+  if (!prompts.length || !choiceTexts.length) return [];
+
+  const collected = {
+    pairs: [],
+    sequentialChoices: [],
+    rawStrings: [],
+  };
+  collectMatchingAnswerEntries(rawAnswer, collected);
+
+  const targetByRow = new Map();
+  collected.pairs.forEach((pair) => {
+    const promptText = parseMatchingAnswerReference(
+      pair.promptRef,
+      prompts,
+      "prompt"
+    );
+    const choiceText = parseMatchingAnswerReference(
+      pair.choiceRef,
+      choiceTexts,
+      "choice"
+    );
+    if (!promptText || !choiceText) return;
+
+    const rowIndex = prompts.findIndex((prompt) => isAnswerMatch(prompt, promptText));
+    if (rowIndex < 0 || targetByRow.has(rowIndex)) return;
+
+    targetByRow.set(rowIndex, {
+      rowIndex,
+      promptText: prompts[rowIndex],
+      choiceText,
+    });
+  });
+
+  if (targetByRow.size === 0 && collected.sequentialChoices.length === prompts.length) {
+    const orderedChoices = collected.sequentialChoices
+      .map((choiceRef) =>
+        parseMatchingAnswerReference(choiceRef, choiceTexts, "choice")
+      )
+      .filter(Boolean);
+
+    if (orderedChoices.length === prompts.length) {
+      orderedChoices.forEach((choiceText, rowIndex) => {
+        targetByRow.set(rowIndex, {
+          rowIndex,
+          promptText: prompts[rowIndex],
+          choiceText,
+        });
+      });
+    }
+  }
+
+  return prompts.map((promptText, rowIndex) => {
+    const target = targetByRow.get(rowIndex);
+    return {
+      rowIndex,
+      promptText,
+      choiceText: target ? target.choiceText : "",
+    };
+  });
+}
+
+function getMatchingSnapshot(container) {
+  return getMatchingRows(container).map((row, rowIndex) => {
+    const rowChoiceItem = getMatchingRowChoiceItem(row);
+    return {
+      rowIndex,
+      promptText: getMatchingPromptText(row),
+      choiceText: rowChoiceItem ? getMatchingChoiceText(rowChoiceItem) : "",
+    };
+  });
+}
+
+function isMatchingAligned(container, targetsByRow) {
+  if (!container || !Array.isArray(targetsByRow) || targetsByRow.length === 0) {
+    return false;
+  }
+
+  const rows = getMatchingRows(container);
+  if (rows.length !== targetsByRow.length) {
+    return false;
+  }
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const target = targetsByRow[rowIndex];
+    if (!target || !target.choiceText) {
+      return false;
+    }
+
+    const currentChoice = getMatchingChoiceText(getMatchingRowChoiceItem(rows[rowIndex]));
+    if (!isAnswerMatch(currentChoice, target.choiceText)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isSameMatchingLocation(beforeLocation, afterLocation) {
+  if (!beforeLocation || !afterLocation) return false;
+
+  return (
+    beforeLocation.area === afterLocation.area &&
+    beforeLocation.rowIndex === afterLocation.rowIndex &&
+    beforeLocation.poolIndex === afterLocation.poolIndex
+  );
+}
+
+async function moveMatchingChoiceToRow(
+  container,
+  choiceText,
+  targetRowIndex,
+  liftConfig = {
+    key: " ",
+    code: "Space",
+    keyCode: 32,
+    poolDirection: "ArrowUp",
+    label: "space-up",
+  }
+) {
+  if (!container || !choiceText || targetRowIndex < 0) {
+    return false;
+  }
+
+  const getCurrentLocation = () => getMatchingChoiceLocation(container, choiceText);
+
+  const focusCurrentHandle = () => {
+    const currentLocation = getCurrentLocation();
+    if (!currentLocation?.item) return null;
+
+    const handle = getMatchingDragHandle(currentLocation.item);
+    if (!handle) return null;
+
+    if (typeof handle.focus === "function") {
+      try {
+        handle.focus({ preventScroll: true });
+      } catch (e) {
+        handle.focus();
+      }
+    }
+
+    return handle;
+  };
+
+  const initialLocation = getCurrentLocation();
+  if (!initialLocation) {
+    return false;
+  }
+  if (initialLocation.rowIndex === targetRowIndex) {
+    return true;
+  }
+
+  const initialHandle = focusCurrentHandle();
+  if (!initialHandle) {
+    return false;
+  }
+  await delay(40);
+
+  dispatchKeyboardSequence(
+    initialHandle,
+    liftConfig.key,
+    liftConfig.code,
+    liftConfig.keyCode
+  );
+  await delay(80);
+
+  const maxMoves = 90;
+  let moveCount = 0;
+  let stagnantMoves = 0;
+
+  while (moveCount < maxMoves) {
+    const currentLocation = getCurrentLocation();
+    if (!currentLocation || currentLocation.rowIndex === targetRowIndex) {
+      break;
+    }
+
+    const handle = focusCurrentHandle();
+    if (!handle) {
+      break;
+    }
+
+    let movementKey = "ArrowUp";
+    let movementCode = "ArrowUp";
+    let movementKeyCode = 38;
+    if (currentLocation.area === "row") {
+      if (currentLocation.rowIndex < targetRowIndex) {
+        movementKey = "ArrowDown";
+        movementCode = "ArrowDown";
+        movementKeyCode = 40;
+      }
+    } else if (liftConfig.poolDirection === "ArrowDown") {
+      movementKey = "ArrowDown";
+      movementCode = "ArrowDown";
+      movementKeyCode = 40;
+    }
+
+    dispatchKeyboardSequence(handle, movementKey, movementCode, movementKeyCode);
+    moveCount += 1;
+    await delay(70);
+
+    const nextLocation = getCurrentLocation();
+    if (nextLocation && isSameMatchingLocation(currentLocation, nextLocation)) {
+      stagnantMoves += 1;
+      if (stagnantMoves >= 4) {
+        break;
+      }
+    } else {
+      stagnantMoves = 0;
+    }
+  }
+
+  const dropHandle = focusCurrentHandle() || initialHandle;
+  dispatchKeyboardSequence(
+    dropHandle,
+    liftConfig.key,
+    liftConfig.code,
+    liftConfig.keyCode
+  );
+  await delay(90);
+
+  const finalLocation = getCurrentLocation();
+  return Boolean(finalLocation && finalLocation.rowIndex === targetRowIndex);
+}
+
+function formatMatchingTargetsForAlert(container, rawAnswer) {
+  const resolvedTargets = normalizeMatchingTargets(container, rawAnswer);
+  const resolvedLines = resolvedTargets
+    .filter((target) => target.choiceText)
+    .map((target) => `${target.promptText} -> ${target.choiceText}`);
+  if (resolvedLines.length > 0) {
+    return resolvedLines;
+  }
+
+  const collected = {
+    pairs: [],
+    sequentialChoices: [],
+    rawStrings: [],
+  };
+  collectMatchingAnswerEntries(rawAnswer, collected);
+
+  const pairLines = collected.pairs
+    .map((pair) => {
+      const promptRef = normalizeChoiceText(pair.promptRef);
+      const choiceRef = normalizeChoiceText(pair.choiceRef);
+      if (!promptRef || !choiceRef) return "";
+      return `${promptRef} -> ${choiceRef}`;
+    })
+    .filter(Boolean);
+
+  const fallbackLines = dedupeAnswers(
+    pairLines.concat(collected.sequentialChoices, collected.rawStrings).filter(Boolean)
+  );
+
+  return fallbackLines;
+}
+
+async function applyMatchingAnswer(container, rawAnswer) {
+  const rows = getMatchingRows(container);
+  if (!rows.length) {
+    console.warn(LOG_PREFIX, "Matching question detected but no response rows found");
+    return false;
+  }
+
+  const targetsByRow = normalizeMatchingTargets(container, rawAnswer);
+  if (!targetsByRow.length) {
+    console.warn(LOG_PREFIX, "Matching question had no usable answers from AI");
+    return false;
+  }
+
+  if (targetsByRow.some((target) => !target.choiceText)) {
+    console.warn(LOG_PREFIX, "Matching targets were incomplete", targetsByRow);
+    return false;
+  }
+
+  console.info(
+    LOG_PREFIX,
+    "Matching target sequence",
+    targetsByRow.map((target) => `${target.promptText} -> ${target.choiceText}`)
+  );
+
+  const liftStrategies = [
+    {
+      key: " ",
+      code: "Space",
+      keyCode: 32,
+      poolDirection: "ArrowUp",
+      label: "space-up",
+    },
+    {
+      key: "Enter",
+      code: "Enter",
+      keyCode: 13,
+      poolDirection: "ArrowUp",
+      label: "enter-up",
+    },
+    {
+      key: " ",
+      code: "Space",
+      keyCode: 32,
+      poolDirection: "ArrowDown",
+      label: "space-down",
+    },
+    {
+      key: "Enter",
+      code: "Enter",
+      keyCode: 13,
+      poolDirection: "ArrowDown",
+      label: "enter-down",
+    },
+  ];
+
+  const maxPasses = 4;
+  for (let pass = 1; pass <= maxPasses; pass += 1) {
+    if (isMatchingAligned(container, targetsByRow)) {
+      return true;
+    }
+
+    for (let rowIndex = 0; rowIndex < targetsByRow.length; rowIndex += 1) {
+      const target = targetsByRow[rowIndex];
+      if (!target.choiceText) {
+        continue;
+      }
+
+      const currentLocation = getMatchingChoiceLocation(container, target.choiceText);
+      if (!currentLocation) {
+        console.warn(
+          LOG_PREFIX,
+          "Unable to locate matching choice:",
+          target.choiceText,
+          "snapshot:",
+          getMatchingSnapshot(container)
+        );
+        continue;
+      }
+
+      if (currentLocation.rowIndex === rowIndex) {
+        continue;
+      }
+
+      let moved = false;
+      for (const strategy of liftStrategies) {
+        const strategyLocation = getMatchingChoiceLocation(
+          container,
+          target.choiceText
+        );
+        if (!strategyLocation) {
+          break;
+        }
+        if (strategyLocation.rowIndex === rowIndex) {
+          moved = true;
+          break;
+        }
+
+        moved = await moveMatchingChoiceToRow(
+          container,
+          target.choiceText,
+          rowIndex,
+          strategy
+        );
+        if (moved) {
+          break;
+        }
+      }
+
+      if (!moved) {
+        console.warn(
+          LOG_PREFIX,
+          "Matching move may not have completed:",
+          `${target.promptText} -> ${target.choiceText}`,
+          "snapshot:",
+          getMatchingSnapshot(container)
+        );
+      }
+    }
+
+    if (!isMatchingAligned(container, targetsByRow)) {
+      console.info(
+        LOG_PREFIX,
+        `Matching pass ${pass} incomplete`,
+        getMatchingSnapshot(container)
+      );
+    }
+  }
+
+  return isMatchingAligned(container, targetsByRow);
+}
 function extractChoicesFromCombinedAnswer(answerText, questionChoices) {
   if (typeof answerText !== "string" || questionChoices.length === 0) {
     return [];
@@ -782,6 +1826,10 @@ function extractChoicesFromCombinedAnswer(answerText, questionChoices) {
 }
 
 function normalizeResponseAnswers(rawAnswer, questionType, container) {
+  if (questionType === "matching") {
+    return formatMatchingTargetsForAlert(container, rawAnswer);
+  }
+
   const flattenedAnswers = flattenAnswerValues(rawAnswer);
   if (flattenedAnswers.length === 0) return [];
 
@@ -809,7 +1857,7 @@ function normalizeResponseAnswers(rawAnswer, questionType, container) {
   return dedupeAnswers(flattenedAnswers);
 }
 
-function processChatGPTResponse(responseText) {
+async function processChatGPTResponse(responseText) {
   try {
     if (handleTopicOverview()) {
       return;
@@ -832,21 +1880,31 @@ function processChatGPTResponse(responseText) {
     lastIncorrectQuestion = null;
     lastCorrectAnswer = null;
 
-    if (container.querySelector(".awd-probe-type-matching")) {
-      const questionSignature = getQuestionSignature(container);
+    if (questionType === "matching") {
+      const applied = await applyMatchingAnswer(container, response.answer);
+      if (!applied) {
+        const questionSignature = getQuestionSignature(container);
+        alert(
+          "Matching Question Solution:\n\n" +
+            (answers.length ? answers.join("\n") : "No confident matches parsed.") +
+            "\n\nPlease input these matches manually, then click high confidence and next. Automation will resume after you move to the next question."
+        );
 
-      alert(
-        "Matching Question Solution:\n\n" +
-          answers.join("\n") +
-          "\n\nPlease input these matches manually, then click high confidence and next. Automation will resume after you move to the next question."
-      );
+        if (isAutomating) {
+          pauseForManualMatchingAndResume(questionSignature);
+        }
 
-      if (isAutomating) {
-        pauseForManualMatchingAndResume(questionSignature);
+        return;
       }
-
-      return;
-    } else if (container.querySelector(".awd-probe-type-select_text")) {
+    } else if (questionType === "fill_in_the_blank") {
+      const inputs = container.querySelectorAll("input.fitb-input");
+      inputs.forEach((input, index) => {
+        if (answers[index]) {
+          input.value = answers[index];
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
+    } else if (questionType === "select_text") {
       const choices = container.querySelectorAll(
         ".select-text-component .choice.-interactive"
       );
@@ -1049,12 +2107,14 @@ function parseQuestion() {
 
   let options = [];
   if (questionType === "matching") {
-    const prompts = Array.from(
-      container.querySelectorAll(".match-prompt .content")
-    ).map((el) => el.textContent.trim());
-    const choices = Array.from(
-      container.querySelectorAll(".choices-container .content")
-    ).map((el) => el.textContent.trim());
+    const prompts = getMatchingRows(container)
+      .map((row) => getMatchingPromptText(row))
+      .filter(Boolean);
+    const choices = dedupeAnswers(
+      getMatchingChoiceItems(container)
+        .map((item) => getMatchingChoiceText(item))
+        .filter(Boolean)
+    );
     options = { prompts, choices };
   } else if (questionType === "select_text") {
     options = Array.from(

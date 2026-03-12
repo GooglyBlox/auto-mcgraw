@@ -63,7 +63,7 @@ async function insertQuestion(questionData) {
       "\nChoices:\n" +
       options.choices.map((choice, i) => `${i + 1}. ${choice}`).join("\n");
     text +=
-      "\n\nPlease match each prompt with the correct choice. Format your answer as an array where each element is 'Prompt -> Choice'.";
+      '\n\nPlease match each prompt with the correct choice. Set "answer" to an array of strings using the exact format \'Prompt -> Choice\'. Include one entry per prompt, use exact prompt and choice text, and use each choice at most once.';
   } else if (type === "fill_in_the_blank") {
     text +=
       "\n\nThis is a fill in the blank question. If there are multiple blanks, provide answers as an array in order of appearance. For a single blank, you can provide a string.";
