@@ -63,6 +63,10 @@ The extension will automatically use your selected AI model for all future autom
 
 This tool is for educational purposes only. Use it responsibly and be aware of your institution's academic integrity policies.
 
+Auto-McGraw is an independent project and is not affiliated with, endorsed by, sponsored by, or otherwise associated with McGraw Hill or any of its related entities.
+
+Any third-party names, trademarks, logos, assets, or likenesses referenced or displayed by this project remain the property of their respective owners and copyright holders.
+
 ## Issues
 
 Found a bug? [Create an issue](https://github.com/GooglyBlox/auto-mcgraw/issues).
