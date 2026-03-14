@@ -69,13 +69,19 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   const doubleCreditToggle = document.getElementById("double-credit-toggle");
+  const randomConfidenceToggle = document.getElementById("random-confidence-toggle");
 
-  chrome.storage.sync.get("doubleCreditMode", function (data) {
+  chrome.storage.sync.get(["doubleCreditMode", "randomConfidence"], function (data) {
     doubleCreditToggle.checked = data.doubleCreditMode || false;
+    randomConfidenceToggle.checked = data.randomConfidence || false;
   });
 
   doubleCreditToggle.addEventListener("change", function () {
     chrome.storage.sync.set({ doubleCreditMode: this.checked });
+  });
+
+  randomConfidenceToggle.addEventListener("change", function () {
+    chrome.storage.sync.set({ randomConfidence: this.checked });
   });
 
   function checkModelAvailability(currentModel) {

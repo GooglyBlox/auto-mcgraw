@@ -3,18 +3,36 @@ let isAutomating = false;
 let lastIncorrectQuestion = null;
 let lastCorrectAnswer = null;
 let doubleCreditMode = false;
+let randomConfidence = false;
 let waitingForDuplicateCompletion = false;
 let currentResponse = null;
 
-chrome.storage.sync.get("doubleCreditMode", function (data) {
+chrome.storage.sync.get(["doubleCreditMode", "randomConfidence"], function (data) {
   doubleCreditMode = data.doubleCreditMode || false;
+  randomConfidence = data.randomConfidence || false;
 });
 
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.doubleCreditMode) {
     doubleCreditMode = changes.doubleCreditMode.newValue;
   }
+  if (changes.randomConfidence) {
+    randomConfidence = changes.randomConfidence.newValue;
+  }
 });
+
+function getConfidenceSelector() {
+  if (!randomConfidence) {
+    return '[data-automation-id="confidence-buttons--high_confidence"]:not([disabled])';
+  }
+  const levels = [
+    "high_confidence",
+    "medium_confidence",
+    "low_confidence",
+  ];
+  const pick = levels[Math.floor(Math.random() * levels.length)];
+  return `[data-automation-id="confidence-buttons--${pick}"]:not([disabled])`;
+}
 
 function setupMessageListener() {
   if (messageListener) {
@@ -140,7 +158,7 @@ function processDuplicateTabAnswering(responseText) {
           fillInAnswers(answers, container);
 
           waitForElement(
-            '[data-automation-id="confidence-buttons--high_confidence"]:not([disabled])',
+            getConfidenceSelector(),
             3000
           )
             .then((button) => {
@@ -180,7 +198,7 @@ function completeDoubleCreditFlow() {
   if (!container) return;
 
   waitForElement(
-    '[data-automation-id="confidence-buttons--high_confidence"]:not([disabled])',
+    getConfidenceSelector(),
     3000
   ).then((button) => {
     button.click();
@@ -630,7 +648,7 @@ function processChatGPTResponse(responseText) {
 
     if (isAutomating) {
       waitForElement(
-        '[data-automation-id="confidence-buttons--high_confidence"]:not([disabled])',
+        getConfidenceSelector(),
         10000
       )
         .then((button) => {
