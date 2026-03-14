@@ -353,6 +353,61 @@ function checkForNextStep() {
   }
 }
 
+function detectQuestionType(container) {
+  if (container.querySelector(".awd-probe-type-multiple_choice")) {
+    return "multiple_choice";
+  }
+  if (container.querySelector(".awd-probe-type-true_false")) {
+    return "true_false";
+  }
+  if (container.querySelector(".awd-probe-type-multiple_select")) {
+    return "multiple_select";
+  }
+  if (container.querySelector(".awd-probe-type-fill_in_the_blank")) {
+    return "fill_in_the_blank";
+  }
+  if (container.querySelector(".awd-probe-type-select_text")) {
+    return "select_text";
+  }
+  if (container.querySelector(".awd-probe-type-matching")) {
+    return "matching";
+  }
+  return "";
+}
+
+function normalizeChoiceText(text) {
+  if (typeof text !== "string") return "";
+
+  return text
+    .replace(/\u00a0/g, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/[’‘]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\.$/, "");
+}
+
+function isAnswerMatch(choiceText, answerText) {
+  if (!choiceText || answerText === null || answerText === undefined) {
+    return false;
+  }
+
+  const choice = String(choiceText).trim();
+  const answer = String(answerText).trim();
+  if (!choice || !answer) return false;
+
+  if (choice === answer) return true;
+
+  const choiceWithoutPeriod = choice.replace(/\.$/, "");
+  const answerWithoutPeriod = answer.replace(/\.$/, "");
+  if (choiceWithoutPeriod === answerWithoutPeriod) return true;
+
+  if (choice === answer + ".") return true;
+
+  return normalizeChoiceText(choice) === normalizeChoiceText(answer);
+}
+
 function extractCorrectAnswer() {
   const container = document.querySelector(".probe-container");
   if (!container) return null;
@@ -362,18 +417,7 @@ function extractCorrectAnswer() {
   );
   if (!incorrectMarker) return null;
 
-  let questionType = "";
-  if (container.querySelector(".awd-probe-type-multiple_choice")) {
-    questionType = "multiple_choice";
-  } else if (container.querySelector(".awd-probe-type-true_false")) {
-    questionType = "true_false";
-  } else if (container.querySelector(".awd-probe-type-multiple_select")) {
-    questionType = "multiple_select";
-  } else if (container.querySelector(".awd-probe-type-fill_in_the_blank")) {
-    questionType = "fill_in_the_blank";
-  } else if (container.querySelector(".awd-probe-type-matching")) {
-    questionType = "matching";
-  }
+  const questionType = detectQuestionType(container);
 
   let questionText = "";
   const promptEl = container.querySelector(".prompt");
@@ -475,6 +519,24 @@ function extractCorrectAnswer() {
     } catch (e) {
       console.error("Error extracting fill in the blank answers:", e);
     }
+  } else if (questionType === "select_text") {
+    try {
+      const correctAnswersList = Array.from(
+        container.querySelectorAll(
+          ".correct-answer-container .choice.-interactive, .correct-answer-container .choiceText, .correct-answer-container .choice"
+        )
+      )
+        .map((el) => el.textContent.trim())
+        .filter(Boolean);
+
+      if (correctAnswersList.length === 1) {
+        correctAnswer = correctAnswersList[0];
+      } else if (correctAnswersList.length > 1) {
+        correctAnswer = correctAnswersList;
+      }
+    } catch (e) {
+      console.error("Error extracting select text answers:", e);
+    }
   }
 
   if (questionType === "matching") {
@@ -526,9 +588,12 @@ function processChatGPTResponse(responseText) {
     }
 
     const response = JSON.parse(responseText);
-    const answers = Array.isArray(response.answer)
+    const answers = (Array.isArray(response.answer)
       ? response.answer
-      : [response.answer];
+      : [response.answer]
+    )
+      .map((ans) => (ans === null || ans === undefined ? "" : String(ans)))
+      .filter(Boolean);
 
     const container = document.querySelector(".probe-container");
     if (!container) return;
@@ -542,6 +607,23 @@ function processChatGPTResponse(responseText) {
           answers.join("\n") +
           "\n\nPlease input these matches manually, then click high confidence and next."
       );
+    } else if (container.querySelector(".awd-probe-type-select_text")) {
+      const choices = container.querySelectorAll(
+        ".select-text-component .choice.-interactive"
+      );
+
+      choices.forEach((choice) => {
+        const choiceText = choice.textContent.trim();
+        if (!choiceText) return;
+
+        const shouldBeSelected = answers.some((ans) =>
+          isAnswerMatch(choiceText, ans)
+        );
+
+        if (shouldBeSelected) {
+          choice.click();
+        }
+      });
     } else {
       fillInAnswers(answers, container);
     }
@@ -680,18 +762,7 @@ function parseQuestion() {
     return null;
   }
 
-  let questionType = "";
-  if (container.querySelector(".awd-probe-type-multiple_choice")) {
-    questionType = "multiple_choice";
-  } else if (container.querySelector(".awd-probe-type-true_false")) {
-    questionType = "true_false";
-  } else if (container.querySelector(".awd-probe-type-multiple_select")) {
-    questionType = "multiple_select";
-  } else if (container.querySelector(".awd-probe-type-fill_in_the_blank")) {
-    questionType = "fill_in_the_blank";
-  } else if (container.querySelector(".awd-probe-type-matching")) {
-    questionType = "matching";
-  }
+  const questionType = detectQuestionType(container);
 
   let questionText = "";
   const promptEl = container.querySelector(".prompt");
@@ -726,6 +797,12 @@ function parseQuestion() {
       container.querySelectorAll(".choices-container .content")
     ).map((el) => el.textContent.trim());
     options = { prompts, choices };
+  } else if (questionType === "select_text") {
+    options = Array.from(
+      container.querySelectorAll(".select-text-component .choice.-interactive")
+    )
+      .map((el) => el.textContent.trim())
+      .filter(Boolean);
   } else if (questionType !== "fill_in_the_blank") {
     container.querySelectorAll(".choiceText").forEach((el) => {
       options.push(el.textContent.trim());
