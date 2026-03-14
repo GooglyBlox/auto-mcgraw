@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto-McGraw Smartbook",
-  "version": "2.1",
+  "version": "2.2",
   "description": "Transfers a question from MHEducation's Smartbook to AI assistants and then uses their response to auto‐select an answer.",
   "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": [
