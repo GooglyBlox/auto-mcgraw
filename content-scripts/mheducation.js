@@ -4,12 +4,14 @@ let lastIncorrectQuestion = null;
 let lastCorrectAnswer = null;
 let doubleCreditMode = false;
 let randomConfidence = false;
+let pauseBeforeSubmit = false;
 let waitingForDuplicateCompletion = false;
 let currentResponse = null;
 
-chrome.storage.sync.get(["doubleCreditMode", "randomConfidence"], function (data) {
+chrome.storage.sync.get(["doubleCreditMode", "randomConfidence", "pauseBeforeSubmit"], function (data) {
   doubleCreditMode = data.doubleCreditMode || false;
   randomConfidence = data.randomConfidence || false;
+  pauseBeforeSubmit = data.pauseBeforeSubmit || false;
 });
 
 chrome.storage.onChanged.addListener((changes) => {
@@ -18,6 +20,9 @@ chrome.storage.onChanged.addListener((changes) => {
   }
   if (changes.randomConfidence) {
     randomConfidence = changes.randomConfidence.newValue;
+  }
+  if (changes.pauseBeforeSubmit) {
+    pauseBeforeSubmit = changes.pauseBeforeSubmit.newValue;
   }
 });
 
@@ -647,35 +652,51 @@ function processChatGPTResponse(responseText) {
     }
 
     if (isAutomating) {
-      waitForElement(
-        getConfidenceSelector(),
-        10000
-      )
-        .then((button) => {
-          button.click();
-
-          setTimeout(() => {
-            checkForCorrectAnswer(container);
-
-            waitForElement(".next-button", 10000)
-              .then((nextButton) => {
-                nextButton.click();
+      if (pauseBeforeSubmit) {
+        waitForElement(".next-button", 120000)
+          .then((nextButton) => {
+            const observer = new MutationObserver(() => {
+              if (nextButton.offsetParent === null) {
+                observer.disconnect();
                 setTimeout(() => {
                   checkForNextStep();
                 }, 1000);
-              })
-              .catch((error) => {
-                console.error("Automation error:", error);
-                isAutomating = false;
-                updateButtonState();
-              });
-          }, 1000);
-        })
-        .catch((error) => {
-          console.error("Automation error:", error);
-          isAutomating = false;
-          updateButtonState();
-        });
+              }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+          })
+          .catch(() => {});
+      } else {
+        waitForElement(
+          getConfidenceSelector(),
+          10000
+        )
+          .then((button) => {
+            button.click();
+
+            setTimeout(() => {
+              checkForCorrectAnswer(container);
+
+              waitForElement(".next-button", 10000)
+                .then((nextButton) => {
+                  nextButton.click();
+                  setTimeout(() => {
+                    checkForNextStep();
+                  }, 1000);
+                })
+                .catch((error) => {
+                  console.error("Automation error:", error);
+                  isAutomating = false;
+                  updateButtonState();
+                });
+            }, 1000);
+          })
+          .catch((error) => {
+            console.error("Automation error:", error);
+            isAutomating = false;
+            updateButtonState();
+          });
+      }
     }
   } catch (e) {
     console.error("Error processing response:", e);
