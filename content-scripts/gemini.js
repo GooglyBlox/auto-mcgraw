@@ -36,6 +36,22 @@ function resetObservation() {
   }
 }
 
+function waitForIdle(timeout = 120000) {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+    const interval = setInterval(() => {
+      const sendButton = document.querySelector(".send-button");
+      if (!sendButton || !sendButton.classList.contains("stop")) {
+        clearInterval(interval);
+        resolve();
+      } else if (Date.now() - startTime > timeout) {
+        clearInterval(interval);
+        reject(new Error("Timed out waiting for Gemini to finish responding"));
+      }
+    }, 500);
+  });
+}
+
 async function insertQuestion(questionData) {
   const { type, question, options, previousCorrection } = questionData;
   let text = `Type: ${type}\nQuestion: ${question}`;
@@ -76,27 +92,31 @@ async function insertQuestion(questionData) {
     '\n\nPlease provide your answer in JSON format with keys "answer" and "explanation". Explanations should be no more than one sentence. DO NOT acknowledge the correction in your response, only answer the new question.';
 
   return new Promise((resolve, reject) => {
-    const inputArea = document.querySelector(".ql-editor");
-    if (inputArea) {
-      setTimeout(() => {
-        inputArea.focus();
-        inputArea.innerHTML = `<p>${text}</p>`;
-        inputArea.dispatchEvent(new Event("input", { bubbles: true }));
+    waitForIdle()
+      .then(() => {
+        const inputArea = document.querySelector(".ql-editor");
+        if (inputArea) {
+          setTimeout(() => {
+            inputArea.focus();
+            inputArea.innerHTML = `<p>${text}</p>`;
+            inputArea.dispatchEvent(new Event("input", { bubbles: true }));
 
-        setTimeout(() => {
-          const sendButton = document.querySelector(".send-button");
-          if (sendButton) {
-            sendButton.click();
-            startObserving();
-            resolve();
-          } else {
-            reject(new Error("Send button not found"));
-          }
-        }, 300);
-      }, 300);
-    } else {
-      reject(new Error("Input area not found"));
-    }
+            setTimeout(() => {
+              const sendButton = document.querySelector(".send-button");
+              if (sendButton) {
+                sendButton.click();
+                startObserving();
+                resolve();
+              } else {
+                reject(new Error("Send button not found"));
+              }
+            }, 300);
+          }, 300);
+        } else {
+          reject(new Error("Input area not found"));
+        }
+      })
+      .catch(reject);
   });
 }
 
