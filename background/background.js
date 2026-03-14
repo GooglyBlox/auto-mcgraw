@@ -10,6 +10,13 @@ let originalTabId = null;
 let storedResponse = null;
 let isProcessingDuplicate = false;
 let pendingResponse = null;
+const DEEPSEEK_URL_PATTERNS = [
+  "https://chat.deepseek.com/*",
+];
+
+function isDeepSeekTabUrl(url = "") {
+  return url.includes("chat.deepseek.com") || url.includes("deepseek.chat");
+}
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
   lastActiveTabId = activeInfo.tabId;
@@ -93,11 +100,14 @@ async function findAndStoreTabs() {
     }
   } else if (aiModel === "deepseek") {
     const tabs = await chrome.tabs.query({
-      url: "https://chat.deepseek.com/*",
+      url: DEEPSEEK_URL_PATTERNS,
     });
     if (tabs.length > 0) {
-      aiTabId = tabs[0].id;
-      aiWindowId = tabs[0].windowId;
+      const preferredTab =
+        tabs.find((tab) => tab.url && tab.url.includes("chat.deepseek.com")) ||
+        tabs[0];
+      aiTabId = preferredTab.id;
+      aiWindowId = preferredTab.windowId;
     } else {
       aiTabId = null;
     }
@@ -258,7 +268,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       aiTabId = sender.tab.id;
       aiWindowId = sender.tab.windowId;
       aiType = "gemini";
-    } else if (sender.tab.url.includes("chat.deepseek.com")) {
+    } else if (isDeepSeekTabUrl(sender.tab.url || "")) {
       aiTabId = sender.tab.id;
       aiWindowId = sender.tab.windowId;
       aiType = "deepseek";

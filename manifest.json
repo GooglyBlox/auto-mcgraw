@@ -9,6 +9,7 @@
     "https://ezto.mheducation.com/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
+    "https://chat.deepseek.com/*",
     "https://deepseek.chat/*",
     "https://api.github.com/*"
   ],

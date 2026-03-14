@@ -1,4 +1,7 @@
 document.addEventListener("DOMContentLoaded", function () {
+  const DEEPSEEK_URL_PATTERNS = [
+    "https://chat.deepseek.com/*",
+  ];
   const chatgptButton = document.getElementById("chatgpt");
   const geminiButton = document.getElementById("gemini");
   const deepseekButton = document.getElementById("deepseek");
@@ -88,7 +91,7 @@ document.addEventListener("DOMContentLoaded", function () {
           const geminiAvailable = geminiTabs.length > 0;
 
           chrome.tabs.query(
-            { url: "https://chat.deepseek.com/*" },
+            { url: DEEPSEEK_URL_PATTERNS },
             (deepseekTabs) => {
               const deepseekAvailable = deepseekTabs.length > 0;
 
@@ -119,7 +122,7 @@ document.addEventListener("DOMContentLoaded", function () {
                   statusMessage.className = "success";
                 } else {
                   statusMessage.textContent =
-                    "Please open DeepSeek in another tab to use this assistant.";
+                    "Please open DeepSeek (chat.deepseek.com) in another tab to use this assistant.";
                   statusMessage.className = "error";
                 }
               }
