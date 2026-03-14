@@ -69,7 +69,7 @@ async function insertQuestion(questionData) {
     text +=
       "\nOptions:\n" + options.map((opt, i) => `${i + 1}. ${opt}`).join("\n");
     text +=
-      "\n\nIMPORTANT: Your answer must EXACTLY match one of the above options. Do not include numbers in your answer. If there are periods, include them.";
+       "\n\nIMPORTANT: Your answer must EXACTLY match the above options. Do not include numbers in your answer. If there are periods, include them. If there are multiple selections, include all of the correct selections.";
   }
 
   text +=
