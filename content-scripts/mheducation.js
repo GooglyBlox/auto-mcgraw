@@ -354,6 +354,7 @@ function pauseForManualMatchingAndResume(questionSignature) {
 
   clearMatchingPauseWatcher();
 
+  // After manual fallback, resume only when the user advances to a different question.
   matchingPauseIntervalId = setInterval(() => {
     if (!isAutomating) {
       clearMatchingPauseWatcher();
@@ -1222,6 +1223,7 @@ function parseMatchingAnswerReference(referenceText, candidateTexts, label = "")
   const normalizedReference = normalizeChoiceText(String(referenceText || ""));
   if (!normalizedReference) return "";
 
+  // Support common AI shorthand like "#2", "choice 3", or "row 1".
   const parseNumericReference = (value) => {
     const match = value.match(/^#?(\d+)$/);
     if (!match) return "";
@@ -1345,6 +1347,7 @@ function collectMatchingAnswerEntries(rawAnswer, output) {
   }
 
   if (typeof rawAnswer === "object") {
+    // Accept both explicit pair objects and map-like objects.
     const promptCandidate =
       rawAnswer.prompt ??
       rawAnswer.left ??
@@ -1460,6 +1463,7 @@ function normalizeMatchingTargets(container, rawAnswer) {
   });
 
   if (targetByRow.size === 0 && collected.sequentialChoices.length === prompts.length) {
+    // If AI only returned ordered choices, map them by row position.
     const orderedChoices = collected.sequentialChoices
       .map((choiceRef) =>
         parseMatchingAnswerReference(choiceRef, choiceTexts, "choice")
@@ -1583,6 +1587,7 @@ async function moveMatchingChoiceToRow(
   }
   await delay(40);
 
+  // Use keyboard drag/drop semantics because they are more reliable than pointer events here.
   dispatchKeyboardSequence(
     initialHandle,
     liftConfig.key,
@@ -1706,6 +1711,7 @@ async function applyMatchingAnswer(container, rawAnswer) {
   );
 
   const liftStrategies = [
+    // Try alternate lift/drop combinations to handle DOM differences across sessions.
     {
       key: " ",
       code: "Space",
@@ -1737,6 +1743,7 @@ async function applyMatchingAnswer(container, rawAnswer) {
   ];
 
   const maxPasses = 4;
+  // Re-run passes because one placement can dislodge another row's current choice.
   for (let pass = 1; pass <= maxPasses; pass += 1) {
     if (isMatchingAligned(container, targetsByRow)) {
       return true;
