@@ -1110,6 +1110,14 @@ function getMatchingComponent(container) {
   return container.querySelector(".matching-component");
 }
 
+// SmartBook rewrites a dropped choice from choices:* to response:* once it lands in a row.
+const MATCHING_ALL_CHOICE_SELECTOR =
+  '.choice-item-wrapper:not(.-placeholder)[id^="choices:"], .choice-item-wrapper:not(.-placeholder)[id^="response:"]';
+const MATCHING_POOL_CHOICE_SELECTOR =
+  '.choices-container .choice-item-wrapper:not(.-placeholder)[id^="choices:"]';
+const MATCHING_ROW_CHOICE_SELECTOR =
+  '.match-single-response-wrapper .choice-item-wrapper:not(.-placeholder)[id^="choices:"], .match-single-response-wrapper .choice-item-wrapper:not(.-placeholder)[id^="response:"]';
+
 function getMatchingRows(container) {
   const matchingComponent = getMatchingComponent(container);
   if (!matchingComponent) return [];
@@ -1141,11 +1149,7 @@ function getMatchingChoiceItems(container) {
   const matchingComponent = getMatchingComponent(container);
   if (!matchingComponent) return [];
 
-  return Array.from(
-    matchingComponent.querySelectorAll(
-      '.choice-item-wrapper[id^="choices:"]:not(.-placeholder)'
-    )
-  );
+  return Array.from(matchingComponent.querySelectorAll(MATCHING_ALL_CHOICE_SELECTOR));
 }
 
 function getMatchingDragHandle(choiceItem) {
@@ -1165,19 +1169,13 @@ function getMatchingPoolChoiceItems(container) {
   const matchingComponent = getMatchingComponent(container);
   if (!matchingComponent) return [];
 
-  return Array.from(
-    matchingComponent.querySelectorAll(
-      '.choices-container .choice-item-wrapper[id^="choices:"]:not(.-placeholder)'
-    )
-  );
+  return Array.from(matchingComponent.querySelectorAll(MATCHING_POOL_CHOICE_SELECTOR));
 }
 
 function getMatchingRowChoiceItem(matchRow) {
   if (!matchRow) return null;
 
-  return matchRow.querySelector(
-    '.match-single-response-wrapper .choice-item-wrapper[id^="choices:"]:not(.-placeholder)'
-  );
+  return matchRow.querySelector(MATCHING_ROW_CHOICE_SELECTOR);
 }
 
 function getMatchingChoiceLocation(container, choiceText) {
@@ -1527,16 +1525,6 @@ function isMatchingAligned(container, targetsByRow) {
   return true;
 }
 
-function isSameMatchingLocation(beforeLocation, afterLocation) {
-  if (!beforeLocation || !afterLocation) return false;
-
-  return (
-    beforeLocation.area === afterLocation.area &&
-    beforeLocation.rowIndex === afterLocation.rowIndex &&
-    beforeLocation.poolIndex === afterLocation.poolIndex
-  );
-}
-
 async function moveMatchingChoiceToRow(
   container,
   choiceText,
@@ -1545,35 +1533,14 @@ async function moveMatchingChoiceToRow(
     key: " ",
     code: "Space",
     keyCode: 32,
-    poolDirection: "ArrowUp",
-    label: "space-up",
   }
 ) {
   if (!container || !choiceText || targetRowIndex < 0) {
     return false;
   }
 
-  const getCurrentLocation = () => getMatchingChoiceLocation(container, choiceText);
-
-  const focusCurrentHandle = () => {
-    const currentLocation = getCurrentLocation();
-    if (!currentLocation?.item) return null;
-
-    const handle = getMatchingDragHandle(currentLocation.item);
-    if (!handle) return null;
-
-    if (typeof handle.focus === "function") {
-      try {
-        handle.focus({ preventScroll: true });
-      } catch (e) {
-        handle.focus();
-      }
-    }
-
-    return handle;
-  };
-
-  const initialLocation = getCurrentLocation();
+  const rows = getMatchingRows(container);
+  const initialLocation = getMatchingChoiceLocation(container, choiceText);
   if (!initialLocation) {
     return false;
   }
@@ -1581,13 +1548,27 @@ async function moveMatchingChoiceToRow(
     return true;
   }
 
-  const initialHandle = focusCurrentHandle();
+  const handle = getMatchingDragHandle(initialLocation.item);
+  if (!handle) {
+    return false;
+  }
+
+  if (typeof handle.focus === "function") {
+    try {
+      handle.focus({ preventScroll: true });
+    } catch (e) {
+      handle.focus();
+    }
+  }
+
+  const initialHandle = handle;
   if (!initialHandle) {
     return false;
   }
   await delay(40);
 
-  // Use keyboard drag/drop semantics because they are more reliable than pointer events here.
+  // SmartBook does not update the DOM after each arrow key while an item is lifted.
+  // Move deterministically by counting the required position changes up front.
   dispatchKeyboardSequence(
     initialHandle,
     liftConfig.key,
@@ -1596,61 +1577,42 @@ async function moveMatchingChoiceToRow(
   );
   await delay(80);
 
-  const maxMoves = 90;
+  let movementKey = "ArrowUp";
+  let movementCode = "ArrowUp";
+  let movementKeyCode = 38;
   let moveCount = 0;
-  let stagnantMoves = 0;
 
-  while (moveCount < maxMoves) {
-    const currentLocation = getCurrentLocation();
-    if (!currentLocation || currentLocation.rowIndex === targetRowIndex) {
-      break;
-    }
-
-    const handle = focusCurrentHandle();
-    if (!handle) {
-      break;
-    }
-
-    let movementKey = "ArrowUp";
-    let movementCode = "ArrowUp";
-    let movementKeyCode = 38;
-    if (currentLocation.area === "row") {
-      if (currentLocation.rowIndex < targetRowIndex) {
-        movementKey = "ArrowDown";
-        movementCode = "ArrowDown";
-        movementKeyCode = 40;
-      }
-    } else if (liftConfig.poolDirection === "ArrowDown") {
+  if (initialLocation.area === "row") {
+    const rowDelta = targetRowIndex - initialLocation.rowIndex;
+    moveCount = Math.abs(rowDelta);
+    if (rowDelta > 0) {
       movementKey = "ArrowDown";
       movementCode = "ArrowDown";
       movementKeyCode = 40;
     }
-
-    dispatchKeyboardSequence(handle, movementKey, movementCode, movementKeyCode);
-    moveCount += 1;
-    await delay(70);
-
-    const nextLocation = getCurrentLocation();
-    if (nextLocation && isSameMatchingLocation(currentLocation, nextLocation)) {
-      stagnantMoves += 1;
-      if (stagnantMoves >= 4) {
-        break;
-      }
-    } else {
-      stagnantMoves = 0;
-    }
+  } else {
+    moveCount = initialLocation.poolIndex + (rows.length - targetRowIndex);
   }
 
-  const dropHandle = focusCurrentHandle() || initialHandle;
+  for (let step = 0; step < moveCount; step += 1) {
+    dispatchKeyboardSequence(
+      initialHandle,
+      movementKey,
+      movementCode,
+      movementKeyCode
+    );
+    await delay(70);
+  }
+
   dispatchKeyboardSequence(
-    dropHandle,
+    initialHandle,
     liftConfig.key,
     liftConfig.code,
     liftConfig.keyCode
   );
-  await delay(90);
+  await delay(120);
 
-  const finalLocation = getCurrentLocation();
+  const finalLocation = getMatchingChoiceLocation(container, choiceText);
   return Boolean(finalLocation && finalLocation.rowIndex === targetRowIndex);
 }
 
@@ -1711,34 +1673,16 @@ async function applyMatchingAnswer(container, rawAnswer) {
   );
 
   const liftStrategies = [
-    // Try alternate lift/drop combinations to handle DOM differences across sessions.
+    // Space is the primary keyboard lift/drop gesture; Enter remains a fallback.
     {
       key: " ",
       code: "Space",
       keyCode: 32,
-      poolDirection: "ArrowUp",
-      label: "space-up",
     },
     {
       key: "Enter",
       code: "Enter",
       keyCode: 13,
-      poolDirection: "ArrowUp",
-      label: "enter-up",
-    },
-    {
-      key: " ",
-      code: "Space",
-      keyCode: 32,
-      poolDirection: "ArrowDown",
-      label: "space-down",
-    },
-    {
-      key: "Enter",
-      code: "Enter",
-      keyCode: 13,
-      poolDirection: "ArrowDown",
-      label: "enter-down",
     },
   ];
 
