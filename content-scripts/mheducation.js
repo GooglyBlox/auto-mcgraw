@@ -62,7 +62,9 @@ function setupMessageListener() {
         currentResponse = message.response;
         processDoubleCreditResponse(message.response);
       } else {
-        processChatGPTResponse(message.response);
+        void processChatGPTResponse(message.response).catch((error) => {
+          handleProcessResponseError(error);
+        });
       }
       sendResponse({ received: true });
       return true;
@@ -88,6 +90,7 @@ function setupMessageListener() {
 
     if (message.type === "stopAutomation") {
       isAutomating = false;
+      clearMatchingPauseWatcher();
       updateButtonState();
       sendResponse({ received: true });
       return true;
@@ -114,6 +117,14 @@ function updateButtonState() {
       btn.textContent = `Ask ${currentModelName}${doubleMode ? " (2x)" : ""}`;
     }
   });
+}
+
+function handleProcessResponseError(error) {
+  console.error("Error processing response:", error);
+  isAutomating = false;
+  waitingForDuplicateCompletion = false;
+  clearMatchingPauseWatcher();
+  updateButtonState();
 }
 
 function processDoubleCreditResponse(responseText) {
@@ -768,55 +779,6 @@ function getQuestionChoices(container, questionType) {
     .map((el) => el.textContent.trim())
     .filter(Boolean);
 }
-function getOrderingChoiceItems(container) {
-  if (!container) return [];
-
-  return Array.from(
-    container.querySelectorAll(
-      ".sortable-component .responses-container .choice-item, .sortable-component .choice-item"
-    )
-  );
-}
-
-function getOrderingChoiceText(choiceItem) {
-  if (!choiceItem) return "";
-
-  const contentEl =
-    choiceItem.querySelector(".content") || choiceItem.querySelector("p");
-  const rawText = contentEl ? contentEl.textContent : choiceItem.textContent;
-  return normalizeChoiceText(rawText || "");
-}
-
-function getOrderingDragHandle(choiceItem) {
-  if (!choiceItem) return null;
-
-  if (choiceItem.matches?.("[data-react-beautiful-dnd-drag-handle]")) {
-    return choiceItem;
-  }
-
-  return (
-    choiceItem.querySelector("[data-react-beautiful-dnd-drag-handle]") ||
-    choiceItem
-  );
-}
-
-function parseOrderingAnswerReference(answerText, choiceTexts) {
-  const normalizedAnswer = normalizeChoiceText(answerText);
-  if (!normalizedAnswer) return "";
-
-  const numericMatch = normalizedAnswer.match(/^choice\s*(\d+)$/i);
-  const simpleNumericMatch = numericMatch
-    ? numericMatch
-    : normalizedAnswer.match(/^(\d+)$/);
-  if (simpleNumericMatch) {
-    const index = Number(simpleNumericMatch[1]) - 1;
-    if (Number.isInteger(index) && index >= 0 && index < choiceTexts.length) {
-      return choiceTexts[index];
-    }
-  }
-
-  return normalizedAnswer;
-}
 
 function createKeyboardEvent(type, key, code, keyCode) {
   const event = new KeyboardEvent(type, {
@@ -855,254 +817,6 @@ function dispatchKeyboardSequence(target, key, code, keyCode) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function findOrderingChoiceIndex(choiceItems, answerText, startIndex = 0) {
-  for (let index = startIndex; index < choiceItems.length; index += 1) {
-    const choiceText = getOrderingChoiceText(choiceItems[index]);
-    if (isAnswerMatch(choiceText, answerText)) {
-      return index;
-    }
-  }
-
-  const normalizedAnswer = normalizeChoiceText(answerText).toLowerCase();
-  if (!normalizedAnswer) return -1;
-
-  for (let index = startIndex; index < choiceItems.length; index += 1) {
-    const normalizedChoice = getOrderingChoiceText(choiceItems[index]).toLowerCase();
-    if (
-      normalizedChoice &&
-      (normalizedChoice.includes(normalizedAnswer) ||
-        normalizedAnswer.includes(normalizedChoice))
-    ) {
-      return index;
-    }
-  }
-
-  return -1;
-}
-
-async function moveOrderingChoiceToIndex(
-  container,
-  choiceItem,
-  targetIndex,
-  liftConfig = { key: " ", code: "Space", keyCode: 32 }
-) {
-  if (!container || !choiceItem || !container.contains(choiceItem)) {
-    return false;
-  }
-
-  const movingText = getOrderingChoiceText(choiceItem);
-  if (!movingText) {
-    return false;
-  }
-
-  const getCurrentIndex = () =>
-    getOrderingChoiceItems(container).findIndex((item) =>
-      isAnswerMatch(getOrderingChoiceText(item), movingText)
-    );
-
-  const focusCurrentHandle = () => {
-    const currentItems = getOrderingChoiceItems(container);
-    const currentIndex = currentItems.findIndex((item) =>
-      isAnswerMatch(getOrderingChoiceText(item), movingText)
-    );
-    if (currentIndex < 0) return null;
-
-    const handle = getOrderingDragHandle(currentItems[currentIndex]);
-    if (!handle) return null;
-
-    if (typeof handle.focus === "function") {
-      try {
-        handle.focus({ preventScroll: true });
-      } catch (e) {
-        handle.focus();
-      }
-    }
-
-    return handle;
-  };
-
-  const initialHandle = focusCurrentHandle();
-  if (!initialHandle) {
-    return false;
-  }
-  await delay(40);
-
-  dispatchKeyboardSequence(
-    initialHandle,
-    liftConfig.key,
-    liftConfig.code,
-    liftConfig.keyCode
-  );
-  await delay(80);
-
-  const maxMoves = 60;
-  let moveCount = 0;
-  let stagnantMoves = 0;
-  while (moveCount < maxMoves) {
-    const currentIndex = getCurrentIndex();
-    if (currentIndex < 0 || currentIndex === targetIndex) {
-      break;
-    }
-
-    const handle = focusCurrentHandle();
-    if (!handle) {
-      break;
-    }
-
-    if (currentIndex > targetIndex) {
-      dispatchKeyboardSequence(handle, "ArrowUp", "ArrowUp", 38);
-    } else {
-      dispatchKeyboardSequence(handle, "ArrowDown", "ArrowDown", 40);
-    }
-
-    moveCount += 1;
-    await delay(60);
-
-    const nextIndex = getCurrentIndex();
-    if (nextIndex === currentIndex) {
-      stagnantMoves += 1;
-      if (stagnantMoves >= 3) {
-        break;
-      }
-    } else {
-      stagnantMoves = 0;
-    }
-  }
-
-  const dropHandle = focusCurrentHandle() || initialHandle;
-  dispatchKeyboardSequence(
-    dropHandle,
-    liftConfig.key,
-    liftConfig.code,
-    liftConfig.keyCode
-  );
-  await delay(80);
-
-  return getCurrentIndex() === targetIndex;
-}
-
-function isOrderingAligned(container, targetAnswers) {
-  if (!container || !Array.isArray(targetAnswers) || targetAnswers.length === 0) {
-    return false;
-  }
-
-  const currentOrder = getOrderingChoiceItems(container).map((item) =>
-    getOrderingChoiceText(item)
-  );
-
-  const compareCount = Math.min(targetAnswers.length, currentOrder.length);
-  for (let index = 0; index < compareCount; index += 1) {
-    if (!isAnswerMatch(currentOrder[index], targetAnswers[index])) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function getOrderingSnapshot(container) {
-  return getOrderingChoiceItems(container)
-    .map((item) => getOrderingChoiceText(item))
-    .filter(Boolean);
-}
-
-async function applyOrderingAnswer(container, rawAnswers) {
-  const choiceItems = getOrderingChoiceItems(container);
-  if (!choiceItems.length) {
-    console.warn(LOG_PREFIX, "Ordering question detected but no sortable choices found");
-    return false;
-  }
-
-  const choiceTexts = choiceItems.map((item) => getOrderingChoiceText(item));
-  const targetAnswers = rawAnswers
-    .map((answer) => parseOrderingAnswerReference(answer, choiceTexts))
-    .filter(Boolean);
-
-  if (!targetAnswers.length) {
-    console.warn(LOG_PREFIX, "Ordering question had no usable answers from AI");
-    return false;
-  }
-
-  const reorderCount = Math.min(targetAnswers.length, choiceItems.length);
-  const expectedOrder = targetAnswers.slice(0, reorderCount);
-  console.info(LOG_PREFIX, "Ordering target sequence", expectedOrder);
-  const liftStrategies = [
-    { key: " ", code: "Space", keyCode: 32, label: "space" },
-    { key: "Enter", code: "Enter", keyCode: 13, label: "enter" },
-  ];
-
-  const maxPasses = 3;
-  for (let pass = 1; pass <= maxPasses; pass += 1) {
-    if (isOrderingAligned(container, expectedOrder)) {
-      return true;
-    }
-
-    for (let targetIndex = 0; targetIndex < reorderCount; targetIndex += 1) {
-      const currentItems = getOrderingChoiceItems(container);
-      const answerText = expectedOrder[targetIndex];
-      const sourceIndex = findOrderingChoiceIndex(
-        currentItems,
-        answerText,
-        targetIndex
-      );
-
-      if (sourceIndex < 0) {
-        console.warn(LOG_PREFIX, "Unable to match ordering answer:", answerText);
-        continue;
-      }
-
-      if (sourceIndex === targetIndex) {
-        continue;
-      }
-
-      let moved = false;
-      for (const strategy of liftStrategies) {
-        const strategyItems = getOrderingChoiceItems(container);
-        const strategySourceIndex = findOrderingChoiceIndex(
-          strategyItems,
-          answerText,
-          targetIndex
-        );
-        if (strategySourceIndex < 0) {
-          break;
-        }
-
-        moved = await moveOrderingChoiceToIndex(
-          container,
-          strategyItems[strategySourceIndex],
-          targetIndex,
-          strategy
-        );
-        if (moved) {
-          break;
-        }
-      }
-
-      if (!moved) {
-        console.warn(
-          LOG_PREFIX,
-          "Ordering move may not have completed:",
-          answerText,
-          "->",
-          targetIndex + 1,
-          "current order:",
-          getOrderingSnapshot(container)
-        );
-      }
-    }
-
-    if (!isOrderingAligned(container, expectedOrder)) {
-      console.info(
-        LOG_PREFIX,
-        `Ordering pass ${pass} incomplete`,
-        getOrderingSnapshot(container)
-      );
-    }
-  }
-
-  return isOrderingAligned(container, expectedOrder);
 }
 
 function getMatchingComponent(container) {
@@ -1569,6 +1283,8 @@ async function moveMatchingChoiceToRow(
 
   // SmartBook does not update the DOM after each arrow key while an item is lifted.
   // Move deterministically by counting the required position changes up front.
+  // This assumes lifted pool items traverse remaining pool choices first, then
+  // the response rows from bottom to top before drop.
   dispatchKeyboardSequence(
     initialHandle,
     liftConfig.key,
@@ -1809,124 +1525,112 @@ function normalizeResponseAnswers(rawAnswer, questionType, container) {
 }
 
 async function processChatGPTResponse(responseText) {
-  try {
-    if (handleTopicOverview()) {
-      return;
-    }
+  if (handleTopicOverview()) {
+    return;
+  }
 
-    if (handleForcedLearning()) {
-      return;
-    }
+  if (handleForcedLearning()) {
+    return;
+  }
 
-    const container = document.querySelector(".probe-container");
-    if (!container) return;
-    const questionType = detectQuestionType(container);
-    const response = JSON.parse(responseText);
-    const answers = normalizeResponseAnswers(
-      response.answer,
-      questionType,
-      container
-    );
+  const container = document.querySelector(".probe-container");
+  if (!container) return;
+  const questionType = detectQuestionType(container);
+  const response = JSON.parse(responseText);
+  const answers = normalizeResponseAnswers(
+    response.answer,
+    questionType,
+    container
+  );
 
-    lastIncorrectQuestion = null;
-    lastCorrectAnswer = null;
+  lastIncorrectQuestion = null;
+  lastCorrectAnswer = null;
 
-    if (questionType === "matching") {
-      const applied = await applyMatchingAnswer(container, response.answer);
-      if (!applied) {
-        const questionSignature = getQuestionSignature(container);
-        alert(
-          "Matching Question Solution:\n\n" +
-            (answers.length ? answers.join("\n") : "No confident matches parsed.") +
-            "\n\nPlease input these matches manually, then click high confidence and next. Automation will resume after you move to the next question."
-        );
-
-        if (isAutomating) {
-          pauseForManualMatchingAndResume(questionSignature);
-        }
-
-        return;
-      }
-    } else if (questionType === "fill_in_the_blank") {
-      const inputs = container.querySelectorAll("input.fitb-input");
-      inputs.forEach((input, index) => {
-        if (answers[index]) {
-          input.value = answers[index];
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-        }
-      });
-    } else if (questionType === "select_text") {
-      const choices = container.querySelectorAll(
-        ".select-text-component .choice.-interactive"
+  if (questionType === "matching") {
+    const applied = await applyMatchingAnswer(container, response.answer);
+    if (!applied) {
+      const questionSignature = getQuestionSignature(container);
+      alert(
+        "Matching Question Solution:\n\n" +
+          (answers.length ? answers.join("\n") : "No confident matches parsed.") +
+          "\n\nPlease input these matches manually, then click high confidence and next. Automation will resume after you move to the next question."
       );
 
-      choices.forEach((choice) => {
-        const choiceText = choice.textContent.trim();
-        if (!choiceText) return;
+      if (isAutomating) {
+        pauseForManualMatchingAndResume(questionSignature);
+      }
 
-        const shouldBeSelected = answers.some((ans) =>
-          isAnswerMatch(choiceText, ans)
-        );
-
-        if (shouldBeSelected) {
-          choice.click();
-        }
-      });
-    } else {
-      fillInAnswers(answers, container);
+      return;
     }
+  } else if (questionType === "select_text") {
+    const choices = container.querySelectorAll(
+      ".select-text-component .choice.-interactive"
+    );
 
-    if (isAutomating) {
-      if (pauseBeforeSubmit) {
-        waitForElement(".next-button", 120000)
-          .then((nextButton) => {
-            const observer = new MutationObserver(() => {
-              if (nextButton.offsetParent === null) {
-                observer.disconnect();
+    choices.forEach((choice) => {
+      const choiceText = choice.textContent.trim();
+      if (!choiceText) return;
+
+      const shouldBeSelected = answers.some((ans) =>
+        isAnswerMatch(choiceText, ans)
+      );
+
+      if (shouldBeSelected) {
+        choice.click();
+      }
+    });
+  } else {
+    fillInAnswers(answers, container);
+  }
+
+  if (isAutomating) {
+    if (pauseBeforeSubmit) {
+      waitForElement(".next-button", 120000)
+        .then((nextButton) => {
+          const observer = new MutationObserver(() => {
+            if (nextButton.offsetParent === null) {
+              observer.disconnect();
+              setTimeout(() => {
+                checkForNextStep();
+              }, 1000);
+            }
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+        })
+        .catch(() => {});
+    } else {
+      waitForElement(
+        getConfidenceSelector(),
+        10000
+      )
+        .then((button) => {
+          button.click();
+
+          setTimeout(() => {
+            checkForCorrectAnswer(container);
+
+            waitForElement(".next-button", 10000)
+              .then((nextButton) => {
+                nextButton.click();
                 setTimeout(() => {
                   checkForNextStep();
                 }, 1000);
-              }
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
-          })
-          .catch(() => {});
-      } else {
-        waitForElement(
-          getConfidenceSelector(),
-          10000
-        )
-          .then((button) => {
-            button.click();
-
-            setTimeout(() => {
-              checkForCorrectAnswer(container);
-
-              waitForElement(".next-button", 10000)
-                .then((nextButton) => {
-                  nextButton.click();
-                  setTimeout(() => {
-                    checkForNextStep();
-                  }, 1000);
-                })
-                .catch((error) => {
-                  console.error("Automation error:", error);
-                  isAutomating = false;
-                  clearMatchingPauseWatcher();
-                  updateButtonState();
-                });
-            }, 1000);
-          })
-          .catch((error) => {
-            console.error("Automation error:", error);
-            isAutomating = false;
-            clearMatchingPauseWatcher();
-            updateButtonState();
-          });
-      }
+              })
+              .catch((error) => {
+                console.error("Automation error:", error);
+                isAutomating = false;
+                clearMatchingPauseWatcher();
+                updateButtonState();
+              });
+          }, 1000);
+        })
+        .catch((error) => {
+          console.error("Automation error:", error);
+          isAutomating = false;
+          clearMatchingPauseWatcher();
+          updateButtonState();
+        });
     }
-  } catch (e) {
-    console.error("Error processing response:", e);
   }
 }
 
