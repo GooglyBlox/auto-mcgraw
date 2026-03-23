@@ -6,7 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/GooglyBlox/auto-mcgraw?include_prereleases&style=flat-square&cache=1)](https://github.com/GooglyBlox/auto-mcgraw/releases)
 [![License](https://img.shields.io/github/license/GooglyBlox/auto-mcgraw?style=flat-square&cache=1)](LICENSE)
-[![Issues](https://img.shields.io/github/issues/GooglyBlox/auto-mcgraw?style=flat-square&cache=1)](https://github.com/GooglyBlox/auto-mcgraw/issues)
+[![Downloads](https://img.shields.io/github/downloads/GooglyBlox/auto-mcgraw/total?style=flat-square&cache=1)](https://github.com/GooglyBlox/auto-mcgraw/releases)
 
 *Automate your McGraw Hill Smartbook homework with AI integration (ChatGPT, Gemini & DeepSeek)*
 
