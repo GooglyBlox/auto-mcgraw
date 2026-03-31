@@ -68,7 +68,13 @@ jobs:
 
       - name: Create zip file
         run: |
-          zip -r auto-mcgraw.zip . -x "*.git*" -x "*.github*" -x "*.zip"
+          zip -r auto-mcgraw.zip \
+            manifest.json \
+            LICENSE \
+            assets/icon.png \
+            background \
+            content-scripts \
+            popup
 
       - name: Create Release
         id: create_release
