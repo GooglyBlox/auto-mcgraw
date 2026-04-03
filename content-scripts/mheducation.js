@@ -482,6 +482,21 @@ function normalizeChoiceText(text) {
     .replace(/\.$/, "");
 }
 
+function stripWrappingQuotes(text) {
+  if (typeof text !== "string") return "";
+
+  const trimmed = text.trim();
+  if (trimmed.length < 2) return trimmed;
+
+  const firstChar = trimmed[0];
+  const lastChar = trimmed[trimmed.length - 1];
+  if (firstChar !== lastChar || !/["'`]/.test(firstChar)) {
+    return trimmed;
+  }
+
+  return trimmed.slice(1, -1).trim();
+}
+
 function isAnswerMatch(choiceText, answerText) {
   if (!choiceText || answerText === null || answerText === undefined) {
     return false;
@@ -499,7 +514,14 @@ function isAnswerMatch(choiceText, answerText) {
 
   if (choice === answer + ".") return true;
 
-  return normalizeChoiceText(choice) === normalizeChoiceText(answer);
+  const normalizedChoice = normalizeChoiceText(choice);
+  const normalizedAnswer = normalizeChoiceText(answer);
+  if (normalizedChoice === normalizedAnswer) return true;
+
+  return (
+    normalizeChoiceText(stripWrappingQuotes(choice)) ===
+    normalizeChoiceText(stripWrappingQuotes(answer))
+  );
 }
 
 function extractCorrectAnswer() {
@@ -959,29 +981,39 @@ function parseMatchingAnswerReference(referenceText, candidateTexts, label = "")
   resolved = parseNumericReference(strippedReference);
   if (resolved) return resolved;
 
-  const exactMatch = candidateTexts.find((candidate) =>
-    isAnswerMatch(candidate, strippedReference)
-  );
-  if (exactMatch) return exactMatch;
+  const referenceVariants = dedupeAnswers([
+    strippedReference,
+    stripWrappingQuotes(strippedReference),
+  ]).filter(Boolean);
 
-  const normalizedTarget = normalizeChoiceText(strippedReference).toLowerCase();
-  if (!normalizedTarget) return "";
-
-  const normalizedCandidateMatch = candidateTexts.find((candidate) => {
-    return normalizeChoiceText(candidate).toLowerCase() === normalizedTarget;
-  });
-  if (normalizedCandidateMatch) return normalizedCandidateMatch;
-
-  const partialMatch = candidateTexts.find((candidate) => {
-    const normalizedCandidate = normalizeChoiceText(candidate).toLowerCase();
-    return (
-      normalizedCandidate &&
-      (normalizedCandidate.includes(normalizedTarget) ||
-        normalizedTarget.includes(normalizedCandidate))
+  for (const variant of referenceVariants) {
+    const exactMatch = candidateTexts.find((candidate) =>
+      isAnswerMatch(candidate, variant)
     );
-  });
+    if (exactMatch) return exactMatch;
+  }
 
-  return partialMatch || "";
+  for (const variant of referenceVariants) {
+    const normalizedTarget = normalizeChoiceText(variant).toLowerCase();
+    if (!normalizedTarget) continue;
+
+    const normalizedCandidateMatch = candidateTexts.find((candidate) => {
+      return normalizeChoiceText(candidate).toLowerCase() === normalizedTarget;
+    });
+    if (normalizedCandidateMatch) return normalizedCandidateMatch;
+
+    const partialMatch = candidateTexts.find((candidate) => {
+      const normalizedCandidate = normalizeChoiceText(candidate).toLowerCase();
+      return (
+        normalizedCandidate &&
+        (normalizedCandidate.includes(normalizedTarget) ||
+          normalizedTarget.includes(normalizedCandidate))
+      );
+    });
+    if (partialMatch) return partialMatch;
+  }
+
+  return "";
 }
 
 function splitMatchingAnswerSegments(answerText) {
@@ -993,7 +1025,6 @@ function splitMatchingAnswerSegments(answerText) {
       segment
         .trim()
         .replace(/^[-*•]\s*/, "")
-        .replace(/^["'`]|["'`]$/g, "")
         .trim()
     )
     .filter(Boolean);
@@ -1022,7 +1053,6 @@ function parseMatchingPairString(answerText) {
   let cleanedText = answerText
     .trim()
     .replace(/^[-*•]\s*/, "")
-    .replace(/^["'`]|["'`]$/g, "")
     .trim();
   if (!/(?:->|=>|:)/.test(cleanedText)) {
     cleanedText = cleanedText.replace(/^\d+[\.)]\s+/, "").trim();
