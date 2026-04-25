@@ -1,0 +1,8 @@
+node_modules/
+.playwright-profile/
+.manual-chrome-profile/
+.extension-load-test-profile/
+.extension-load-test-edge-profile/
+playwright-debug.log
+manual-debug-browser.log
+playwright-artifacts/

@@ -2,11 +2,12 @@
   "manifest_version": 3,
   "name": "Auto-McGraw Smartbook",
   "version": "2.4",
-  "description": "Transfers a question from MHEducation's Smartbook to AI assistants and then uses their response to auto‐select an answer.",
+  "description": "Transfers a question from MHEducation's Smartbook to AI assistants and then uses their response to auto-select an answer.",
   "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": [
     "https://learning.mheducation.com/*",
     "https://ezto.mheducation.com/*",
+    "https://newconnect.mheducation.com/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
     "https://chat.deepseek.com/*",
@@ -29,7 +30,10 @@
       "js": ["content-scripts/mheducation.js"]
     },
     {
-      "matches": ["https://ezto.mheducation.com/*"],
+      "matches": [
+        "https://ezto.mheducation.com/*",
+        "https://newconnect.mheducation.com/*"
+      ],
       "js": ["content-scripts/ezto-mheducation.js"]
     },
     {
