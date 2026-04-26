@@ -1,4 +1,6 @@
 node_modules/
+package-lock.json
+scripts/
 .playwright-profile/
 .manual-chrome-profile/
 .extension-load-test-profile/

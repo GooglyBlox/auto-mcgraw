@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/github/license/GooglyBlox/auto-mcgraw?style=flat-square&cache=1)](LICENSE)
 [![Downloads](https://img.shields.io/github/downloads/GooglyBlox/auto-mcgraw/total?style=flat-square&cache=1)](https://github.com/GooglyBlox/auto-mcgraw/releases)
 
-*Automate your McGraw Hill Smartbook homework with AI integration (ChatGPT, Gemini & DeepSeek)*
+*Automate your McGraw Hill Smartbook and Connect homework with AI integration (ChatGPT, Gemini & DeepSeek)*
 
 [Installation](#installation) • [Usage](#usage) • [Settings](#settings) • [Issues](#issues)
 
@@ -32,7 +32,7 @@
 
 ## Usage
 
-1. Log into your McGraw Hill account and open a Smartbook assignment
+1. Log into your McGraw Hill account and open a Smartbook or Connect assignment
 2. Log into one of the supported AI assistants in another tab:
    - [ChatGPT](https://chatgpt.com)
    - [Gemini](https://gemini.google.com)
