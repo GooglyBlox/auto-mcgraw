@@ -385,50 +385,66 @@ function buildConnectSnapshotPrompt(questionData, baseText) {
       .length,
   });
 
-  let text = `${baseText}\n\nInteractive controls:\n${JSON.stringify(controls)}`;
+  let text = `${baseText}\n\nInteractive controls:\n${JSON.stringify(
+    controls,
+    null,
+    2
+  )}`;
 
-  text += `\n\nDropdown controls/options:\n${JSON.stringify(dropdowns)}`;
+  text += `\n\nDropdown controls/options:\n${JSON.stringify(
+    dropdowns,
+    null,
+    2
+  )}`;
 
-  text += `\n\nDropdown option sets:\n${JSON.stringify(optionSets)}`;
+  text += `\n\nDropdown option sets:\n${JSON.stringify(
+    optionSets,
+    null,
+    2
+  )}`;
 
   text +=
     '\n\nThis is a non-SmartBook Connect page with an unknown layout. Return JSON with keys "answer", "explanation", and "actions".';
   text +=
-    '\n"actions" must be a non-empty array when answer controls are present. Each action must include "selector", "action", and "intent".';
+    '\n\nReturn only the raw JSON object. Do not include acknowledgements, corrections, markdown fences, or prose outside the JSON.';
   text +=
-    '\nUse only selectors from Interactive controls. Put answer actions first, then submit/next/continue actions if needed.';
+    '\n\n"actions" must be a non-empty array when answer controls are present. Each action must include "selector", "action", and "intent".';
   text +=
-    '\nUse "intent":"answer" for answer controls and "intent":"submit", "intent":"next", or "intent":"continue" for movement/submission controls.';
+    '\n\nUse only selectors from Interactive controls. Put answer actions first, then submit/next/continue actions if needed.';
   text +=
-    '\nUse "intent":"continue" for controls that only reveal the real answer editor or worksheet, such as Edit journal entry worksheet, View journal entry worksheet, View transaction list, Add, or similar setup controls.';
+    '\n\nUse "intent":"answer" for answer controls and "intent":"submit", "intent":"next", or "intent":"continue" for movement/submission controls.';
   text +=
-    '\nDo not include next or submit actions when the current answer fields are blank or only a setup/editor-opening control is visible.';
+    '\n\nUse "intent":"continue" for controls that only reveal the real answer editor or worksheet, such as Edit journal entry worksheet, View journal entry worksheet, View transaction list, Add, or similar setup controls.';
   text +=
-    '\nIf an embedded worksheet already shows all required values filled correctly and no required blank answer fields remain, treat that sub-question as complete. Do not click Record entry/Save again; choose the next navigation action, usually the main-page Next button when no in-tool next/sub-part control is needed.';
+    '\n\nDo not include next or submit actions when the current answer fields are blank or only a setup/editor-opening control is visible.';
   text +=
-    "\nWhen clicking an embedded save button such as Record entry, Save entry, Save & Next, Save transaction, or Submit, make it the final action. The harness will re-snapshot or advance after the save.";
+    '\n\nIMPORTANT: If an embedded worksheet already shows all required values filled correctly and no required blank answer fields remain, treat that sub-question as complete. Your actions MUST NOT click Record entry, Save entry, Save transaction, Save & Next, or any other embedded save/record button again. Choose the next navigation action instead, usually the main-page Next button when no in-tool next/sub-part control is needed.';
   text +=
-    '\nIf the embedded tool exposes Required tabs, sub-page steps, or transaction buttons but no visible save button on the current sub-part, click the relevant navigation control as the final action and stop there. The harness will re-snapshot for the next sub-part.';
+    "\n\nOnly click an embedded save/record button when you have just added or changed answer values in this same response. When you do click one, make it the final action. The harness will re-snapshot or advance after the save.";
   text +=
-    '\nOnly include a main-page Next or final Submit action when there are no unanswered fields left, or the page is already saved and main-page navigation is the only useful action.';
+    '\n\nIf the embedded tool exposes Required tabs, sub-page steps, or transaction buttons but no visible save button on the current sub-part, click the relevant navigation control as the final action and stop there. The harness will re-snapshot for the next sub-part.';
   text +=
-    '\nUse "click" for radio/checkbox/button choices, "fill" for text inputs/textareas/contenteditable elements, and "select" with a "value" for native selects, dropdowns, and combobox cells.';
+    '\n\nOnly include a main-page Next or final Submit action when there are no unanswered fields left, or the page is already saved and main-page navigation is the only useful action.';
   text +=
-    "\nFor spreadsheet-style statement tables, selecting the row label is not enough. If an amount belongs on that row, also add a fill action for the blank amount/value cell in the same row, using the selector for that numeric response cell.";
+    '\n\nUse the top-level Submit button only to submit the entire assignment after the final item is complete. For moving from one item/question to the next, use the main-page Next button, not Submit.';
   text +=
-    "\nFor negative numeric values in spreadsheet, journal, or statement cells, write them in McGraw's accounting format using parentheses (e.g. \"(4,976)\" or \"(4976)\" instead of \"-4976\"). McGraw spreadsheet cells display and store negatives as parentheses, so using parentheses keeps your input format aligned with what the cell will read back.";
+    '\n\nUse "click" for radio/checkbox/button choices, "fill" for text inputs/textareas/contenteditable elements, and "select" with a "value" for native selects, dropdowns, and combobox cells.';
   text +=
-    "\nSpreadsheet controls may include context.rowIndex, context.columnIndex, and context.rowCells. Use that context to keep row labels, debit/credit amounts, and totals in the correct cells.";
+    "\n\nFor spreadsheet-style statement tables, selecting the row label is not enough. If an amount belongs on that row, also add a fill action for the blank amount/value cell in the same row, using the selector for that numeric response cell.";
   text +=
-    "\nFor dropdowns, value must be copied exactly from the matching optionSetId in Dropdown option sets. If your natural answer uses a synonym, choose the exact listed option label instead of paraphrasing.";
+    "\n\nFor negative numeric values in spreadsheet, journal, or statement cells, write them in McGraw's accounting format using parentheses (e.g. \"(4,976)\" or \"(4976)\" instead of \"-4976\"). McGraw spreadsheet cells display and store negatives as parentheses, so using parentheses keeps your input format aligned with what the cell will read back.";
   text +=
-    "\nWhen writing a data-automcgraw-id selector, use single quotes inside the selector string, for example \"[data-automcgraw-id='el-13']\".";
+    "\n\nSpreadsheet controls may include context.rowIndex, context.columnIndex, and context.rowCells. Use that context to keep row labels, debit/credit amounts, and totals in the correct cells.";
   text +=
-    '\nIf the answer is a table keyed by row letters such as a, b, c, map each row to the matching control selector and include one action per row.';
+    "\n\nFor dropdowns, value must be copied exactly from the matching optionSetId in Dropdown option sets. If your natural answer uses a synonym, choose the exact listed option label instead of paraphrasing.";
   text +=
-    '\nExplanations should be no more than one sentence. DO NOT acknowledge the correction in your response, only answer the new question.';
+    "\n\nWhen writing a data-automcgraw-id selector, use single quotes inside the selector string, for example \"[data-automcgraw-id='el-13']\".";
   text +=
-    '\nExample action: {"selector":"[data-automcgraw-id=\'el-13\']","action":"select","value":"Double taxation","intent":"answer"}.';
+    '\n\nIf the answer is a table keyed by row letters such as a, b, c, map each row to the matching control selector and include one action per row.';
+  text +=
+    '\n\nExplanations should be no more than one sentence. DO NOT acknowledge the correction in your response, only answer the new question.';
+  text +=
+    '\n\nExample action: {"selector":"[data-automcgraw-id=\'el-13\']","action":"select","value":"Double taxation","intent":"answer"}.';
 
   return text;
 }

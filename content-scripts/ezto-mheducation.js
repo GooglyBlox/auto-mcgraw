@@ -1422,20 +1422,30 @@ function normalizeActions(actions) {
 }
 
 function sanitizeActions(actions) {
-  return actions.filter((action) => {
+  return actions.flatMap((action) => {
     const control = findLastControlForAction(action);
     const target = control ? null : findElementDeep(action.selector);
-    if (target && isAccountingNavigationControl(target)) return false;
-    if (!control) return true;
+    if (target && isAccountingNavigationControl(target)) return [];
+    if (!control) return [action];
 
     const text = `${control.label || ""} ${control.text || ""} ${
       control.nearbyText || ""
     }`;
-    if (/\bcheck my work\b/i.test(text)) return false;
+    if (/\bcheck my work\b/i.test(text)) return [];
 
-    const isMainAssignmentSubmit =
-      control.frame === "main" && /\bsubmit\b/i.test(text);
-    return !isMainAssignmentSubmit;
+    if (isTopLevelAssignmentSubmitControl(control)) {
+      if (canAutoSubmitAssignment()) return [action];
+
+      const nextAction = buildMainNextAction();
+      debugLog(
+        "sanitize_premature_submit_replaced",
+        { action, replacement: nextAction, submitState: getAutoSubmitDebugState() },
+        "warn"
+      );
+      return nextAction ? [nextAction] : [];
+    }
+
+    return [action];
   });
 }
 
@@ -1446,6 +1456,43 @@ function trimActionsAfterInToolSubmit(actions) {
   if (submitIndex === -1) return actions;
 
   return actions.slice(0, submitIndex + 1);
+}
+
+function isTopLevelAssignmentSubmitControl(control) {
+  if (!control || control.frame !== "main") return false;
+
+  const text = normalizeWhitespace(
+    `${control.label || ""} ${control.text || ""} ${
+      control.value || ""
+    }`
+  );
+  if (!/\bsubmit\b/i.test(text)) return false;
+
+  const target = findElementDeep(control.selector);
+  return Boolean(
+    target?.classList?.contains("header__exit--submit") ||
+      target?.closest?.(".header__exits")
+  );
+}
+
+function buildMainNextAction() {
+  if (!lastQuestionData || !Array.isArray(lastQuestionData.controls)) return null;
+
+  const nextControl = lastQuestionData.controls.find((control) => {
+    if (control.frame !== "main") return false;
+    const text = normalizeWhitespace(
+      `${control.label || ""} ${control.text || ""} ${control.value || ""}`
+    );
+    return /\bnext\b/i.test(text);
+  });
+
+  return nextControl
+    ? {
+        selector: nextControl.selector,
+        action: "click",
+        intent: "next",
+      }
+    : null;
 }
 
 function holdMainNextAfterLocalAnswer(actions) {
@@ -1800,15 +1847,6 @@ async function executeActions(actions) {
       debugLog("execute_action_selector_missing", { action }, "error");
       throw error;
     }
-    if (isTopLevelAssignmentSubmitElement(target)) {
-      setAutomationDiagnostic("ignored_ai_assignment_submit_action");
-      debugLog("execute_action_ignored_assignment_submit", {
-        action,
-        target,
-      }, "warn");
-      continue;
-    }
-
     try {
       debugLog("execute_action_target", { action, target });
       if (action.action === "click") {
@@ -1900,24 +1938,6 @@ function clickElement(element) {
   element.focus?.();
   dispatchMouseSequence(element, { includeClick: false });
   element.click();
-}
-
-function isTopLevelAssignmentSubmitElement(element) {
-  if (element.ownerDocument !== document) return false;
-
-  const text = normalizeWhitespace(
-    element.value ||
-      element.innerText ||
-      element.textContent ||
-      element.getAttribute("aria-label") ||
-      ""
-  );
-
-  return (
-    /\bsubmit\b/i.test(text) &&
-    (element.classList.contains("header__exit--submit") ||
-      element.closest(".header__exits"))
-  );
 }
 
 async function fillElement(element, value) {
@@ -2442,6 +2462,12 @@ async function continueAfterResponse(actions) {
     }
 
     await advanceConnectPageIfNeeded(actions);
+    if (actions.some((action) => action.intent === "submit")) {
+      debugLog("continue_after_response_submit_complete");
+      stopAutomation("Assignment submitted");
+      return;
+    }
+
     setTimeout(() => {
       if (isAutomating) {
         debugLog("continue_after_response_next_snapshot");
