@@ -378,6 +378,14 @@ async function checkForNextStep() {
   }
 
   await waitForConnectContentReady();
+  // Settle buffer: waitForConnectContentReady only confirms answer-control
+  // selectors exist; embedded tools often need extra time to fully render
+  // their controls and labels. Without this we sometimes snapshot an empty
+  // or partial widget and ship that to the AI, which then "answers" with
+  // just a Next click and skips the question.
+  if (!isQuizPage()) {
+    await delay(1500);
+  }
 
   const questionData = isQuizPage()
     ? parseQuestion()
@@ -2124,10 +2132,20 @@ function normalizeNumberText(value) {
   const numeric = text.replace(/[^\d.-]/g, "");
   if (!numeric) return "";
 
-  const normalized = numeric.replace(/(?!^)-/g, "");
-  return isParentheticalNegative && !normalized.startsWith("-")
-    ? `-${normalized}`
-    : normalized;
+  const stripped = numeric.replace(/(?!^)-/g, "");
+  const signed =
+    isParentheticalNegative && !stripped.startsWith("-")
+      ? `-${stripped}`
+      : stripped;
+
+  // Canonicalize through Number so different surface forms of the same value
+  // compare equal: "-4976", "-4976.00", "(4,976.00)", and "(4976)" all
+  // collapse to "-4976". Without this, McGraw's spreadsheet cells often
+  // re-format AI input (e.g. add ".00" or commas) and our verifier rejects
+  // a fill that actually succeeded.
+  const number = parseFloat(signed);
+  if (Number.isFinite(number)) return String(number);
+  return signed;
 }
 
 function dispatchMouseSequence(element, options = {}) {

@@ -404,17 +404,19 @@ function buildConnectSnapshotPrompt(questionData, baseText) {
   text +=
     '\nDo not include next or submit actions when the current answer fields are blank or only a setup/editor-opening control is visible.';
   text +=
-    '\nIf the current worksheet is already filled and saved, return the appropriate in-tool next/continue action instead of re-answering that same worksheet.';
+    '\nIf an embedded worksheet already shows all required values filled correctly and no required blank answer fields remain, treat that sub-question as complete. Do not click Record entry/Save again; choose the next navigation action, usually the main-page Next button when no in-tool next/sub-part control is needed.';
   text +=
-    "\nCRITICAL: An embedded tool's save button (e.g. Record entry, Save entry, Save & Next, Save transaction, Submit) advances to the next sub-question on its own when there are more sub-questions, or completes the worksheet when there are none. Make that save button the FINAL action of your response. Do NOT add any subsequent click, next, submit, continue, or tab-navigation action after it — including a main-page Next. The harness will re-snapshot and prompt you again for whatever the embedded tool shows next.";
+    "\nWhen clicking an embedded save button such as Record entry, Save entry, Save & Next, Save transaction, or Submit, make it the final action. The harness will re-snapshot or advance after the save.";
   text +=
     '\nIf the embedded tool exposes Required tabs, sub-page steps, or transaction buttons but no visible save button on the current sub-part, click the relevant navigation control as the final action and stop there. The harness will re-snapshot for the next sub-part.';
   text +=
-    '\nOnly include a main-page Next or final Submit action when there are NO answer fields, NO embedded save buttons, and NO embedded sub-part navigation visible — i.e., the only meaningful interactive control left is the main-page navigation itself.';
+    '\nOnly include a main-page Next or final Submit action when there are no unanswered fields left, or the page is already saved and main-page navigation is the only useful action.';
   text +=
     '\nUse "click" for radio/checkbox/button choices, "fill" for text inputs/textareas/contenteditable elements, and "select" with a "value" for native selects, dropdowns, and combobox cells.';
   text +=
     "\nFor spreadsheet-style statement tables, selecting the row label is not enough. If an amount belongs on that row, also add a fill action for the blank amount/value cell in the same row, using the selector for that numeric response cell.";
+  text +=
+    "\nFor negative numeric values in spreadsheet, journal, or statement cells, write them in McGraw's accounting format using parentheses (e.g. \"(4,976)\" or \"(4976)\" instead of \"-4976\"). McGraw spreadsheet cells display and store negatives as parentheses, so using parentheses keeps your input format aligned with what the cell will read back.";
   text +=
     "\nSpreadsheet controls may include context.rowIndex, context.columnIndex, and context.rowCells. Use that context to keep row labels, debit/credit amounts, and totals in the correct cells.";
   text +=
