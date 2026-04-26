@@ -4,18 +4,6 @@
 
 <img src="assets/icon.png" alt="Auto-McGraw Logo" width="200">
 
-## Fork Notice
-
-This fork expands the original SmartBook-focused extension with broader McGraw Hill Connect support, including non-SmartBook assignments, embedded accounting worksheets, journal-entry style tools, and final submission handling.
-
-Major changes in this fork:
-
-- Connect snapshot automation with selector-based actions for complex page layouts
-- Prompt/action parity across ChatGPT, Gemini, and DeepSeek
-- Support for dropdowns, spreadsheet-style cells, journal entries, and negative accounting values
-- Safer worksheet navigation, including avoiding repeated Record entry / Save clicks on completed sub-questions
-- Improved handling for final Next / Submit behavior and assignment completion
-
 [![Release](https://img.shields.io/github/v/release/GooglyBlox/auto-mcgraw?include_prereleases&style=flat-square&cache=1)](https://github.com/GooglyBlox/auto-mcgraw/releases)
 [![License](https://img.shields.io/github/license/GooglyBlox/auto-mcgraw?style=flat-square&cache=1)](LICENSE)
 [![Downloads](https://img.shields.io/github/downloads/GooglyBlox/auto-mcgraw/total?style=flat-square&cache=1)](https://github.com/GooglyBlox/auto-mcgraw/releases)
@@ -25,6 +13,21 @@ Major changes in this fork:
 [Installation](#installation) • [Usage](#usage) • [Settings](#settings) • [Issues](#issues)
 
 </div>
+
+---
+
+## Fork Notice
+
+This fork is based on [`GooglyBlox/auto-mcgraw`](https://github.com/GooglyBlox/auto-mcgraw) v2.4/main and keeps the original SmartBook flow while adding broader McGraw Hill Connect support.
+
+Major changes compared with the original project:
+
+- Added Connect support for `ezto.mheducation.com` and `newconnect.mheducation.com`, including non-SmartBook page snapshots.
+- Added selector-driven action prompts for complex Connect layouts, embedded accounting tools, journal-entry worksheets, dropdowns, spreadsheet cells, and negative accounting values.
+- Brought Connect prompt/action support to ChatGPT, Gemini, and DeepSeek so all three providers receive the same controls, dropdown options, and action instructions.
+- Improved Connect navigation around worksheet saves, repeated Record entry / Save clicks, main Next behavior, and final assignment Submit handling.
+- Added debug logging and routing improvements in the background and Connect content scripts to make tab/model selection and failures easier to diagnose.
+- Cleaned up local debug/dev artifacts so the packaged extension remains focused on runtime files.
 
 ---
 
