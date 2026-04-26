@@ -10,6 +10,7 @@ let answeredAssessmentWorkUnitIds = new Set();
 let lastAnswerActionAt = 0;
 let awaitingAiResponse = false;
 let processingAiResponse = false;
+let heldMainNextAfterLocalAnswer = false;
 const dropdownOptionsCache = new WeakMap();
 
 const AUTOMCGRAW_ID = "data-automcgraw-id";
@@ -17,6 +18,7 @@ const MAX_TEXT_LENGTH = 18000;
 const MAX_CONTROLS = 120;
 const DEBUG_LOG_KEY = "automcgraw.debugLogs.v1";
 const DEBUG_MAX_LOGS = 600;
+const DEFAULT_AI_MODEL = "chatgpt";
 
 document.documentElement.setAttribute("data-automcgraw-ezto-loaded", "true");
 window.__automcgrawDebugLogs = window.__automcgrawDebugLogs || [];
@@ -33,8 +35,11 @@ function debugLog(event, details = {}, level = "debug") {
 
   appendDebugEntry(entry);
 
+  // Use console.log for the default level so events show up without having
+  // to enable DevTools' Verbose level. Errors and warnings still use the
+  // matching console method so they get DevTools' built-in highlighting.
   const consoleMethod =
-    level === "error" ? "error" : level === "warn" ? "warn" : "debug";
+    level === "error" ? "error" : level === "warn" ? "warn" : "log";
   console[consoleMethod]("[AutoMcGraw]", event, entry);
 }
 
@@ -278,7 +283,17 @@ function isConnectAssignmentPage() {
 }
 
 function checkForQuizAndAddButton() {
-  if (buttonAdded || !isTopWindow()) return;
+  if (!isTopWindow()) return;
+
+  const existingButton = document.querySelector(".header__automcgraw");
+  if (existingButton) {
+    buttonAdded = true;
+    return;
+  }
+
+  if (buttonAdded) {
+    buttonAdded = false;
+  }
 
   if (isQuizPage() || isConnectAssignmentPage()) {
     debugLog("assistant_button_added", {
@@ -294,9 +309,7 @@ function startPageObserver() {
   if (!document.body || !isTopWindow()) return;
 
   const observer = new MutationObserver(() => {
-    if (!buttonAdded) {
-      checkForQuizAndAddButton();
-    }
+    checkForQuizAndAddButton();
   });
 
   observer.observe(document.body, {
@@ -337,7 +350,7 @@ function stopAutomation(reason = "Quiz completed") {
 
   const btn = document.querySelector(".header__automcgraw--main");
   if (btn) {
-    btn.textContent = "Ask ChatGPT";
+    btn.textContent = "Ask AI";
   }
 
   if (reason) {
@@ -372,6 +385,7 @@ async function checkForNextStep() {
 
   if (questionData) {
     lastQuestionData = questionData;
+    const aiModel = await getSelectedAiModel();
     debugLog("next_step_question_ready", {
       type: questionData.type,
       questionLength: String(questionData.question || "").length,
@@ -379,13 +393,14 @@ async function checkForNextStep() {
       dropdowns: questionData.dropdowns?.length || 0,
       activeAssessmentTab: getActiveAssessmentTabLabel(),
       visibleAssessmentTabs: getVisibleAssessmentTabLabels(),
+      aiModel,
     });
     awaitingAiResponse = true;
     chrome.runtime.sendMessage(
       {
         type: "sendQuestionToChatGPT",
         question: questionData,
-        aiModel: "chatgpt",
+        aiModel,
       },
       (response) => {
         if (chrome.runtime.lastError || !response?.received) {
@@ -398,7 +413,7 @@ async function checkForNextStep() {
             },
             "error"
           );
-          stopAutomation("Could not send question to ChatGPT");
+          stopAutomation("Could not send question to the selected AI assistant");
         }
       }
     );
@@ -412,6 +427,19 @@ function isAssignmentSubmittedPage() {
   return /you(?:'|’|&rsquo;)re done!\s+you submitted this assignment/i.test(
     document.body?.innerText || ""
   );
+}
+
+function getSelectedAiModel() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.sync.get("aiModel", (data) => {
+        resolve(data?.aiModel || DEFAULT_AI_MODEL);
+      });
+    } catch (error) {
+      debugLog("selected_ai_model_fallback", { error }, "warn");
+      resolve(DEFAULT_AI_MODEL);
+    }
+  });
 }
 
 async function waitForConnectContentReady(timeout = 5000) {
@@ -661,7 +689,7 @@ function getInteractiveElements(doc) {
       if (seenControlKeys.has(duplicateKey)) return false;
       seenControlKeys.add(duplicateKey);
     }
-    if (element.matches("[disabled], [aria-disabled='true']")) return true;
+    if (isDisabledControl(element)) return false;
     if (element.matches("a[href]") && !normalizeWhitespace(element.textContent)) {
       return false;
     }
@@ -1207,6 +1235,9 @@ async function processChatGPTResponse(responseText) {
       responsePreview: String(responseText || "").slice(0, 1500),
     });
     const response = parseJsonResponse(responseText);
+    if (!response || typeof response !== "object") {
+      throw new Error("AI response was not a JSON object");
+    }
     const answer = response.answer;
     let actions = sanitizeActions(normalizeActions(response.actions));
     debugLog("response_parsed", {
@@ -1225,27 +1256,37 @@ async function processChatGPTResponse(responseText) {
       actionCountAfterExpand: actions.length,
       actions,
     });
+    const mainNextSafety = holdMainNextAfterLocalAnswer(actions);
+    actions = mainNextSafety.actions;
+    heldMainNextAfterLocalAnswer = mainNextSafety.held;
+    debugLog("response_actions_local_next_safe", {
+      heldMainNextAfterLocalAnswer,
+      actionCountAfterLocalNextSafety: actions.length,
+      actions,
+    });
+
+    console.log(
+      "[AutoMcGraw][AI-RESPONSE]",
+      `progress=${getProgress()?.current || "?"}/${
+        getProgress()?.total || "?"
+      }`,
+      `activeTab="${getActiveAssessmentTabLabel() || ""}"`,
+      `heldMainNext=${heldMainNextAfterLocalAnswer}`,
+      "actions=",
+      actions.map((action) => ({
+        intent: action.intent,
+        action: action.action,
+        selector: action.selector,
+        value: action.value,
+        frame: getActionFrame(action),
+        controlText:
+          findLastControlForAction(action)?.text ||
+          findLastControlForAction(action)?.label ||
+          "",
+      }))
+    );
 
     if (actions.length) {
-      const guard = guardUnsafeMovementActions(actions);
-      if (guard.blocked) {
-        setAutomationDiagnostic(guard.reason);
-        debugLog("response_actions_guard_blocked", {
-          reason: guard.reason,
-          setupActions: guard.setupActions,
-          actions,
-        }, "warn");
-        if (guard.setupActions.length) {
-          await executeActions(guard.setupActions);
-          await continueAfterResponse(guard.setupActions);
-          return;
-        }
-
-        throw new Error(
-          "AI tried to move forward without answering the current question"
-        );
-      }
-
       try {
         await executeActionsWithPreSubmitRepair(actions, answer);
       } catch (error) {
@@ -1290,13 +1331,19 @@ async function processChatGPTResponse(responseText) {
       throw new Error("AI response did not include executable actions");
     }
 
+    let legacyAnswerHandled = false;
     if (document.querySelector(".answers-wrap.multiple-choice")) {
-      handleMultipleChoiceAnswer(answer);
+      legacyAnswerHandled = handleMultipleChoiceAnswer(answer);
     } else if (document.querySelector(".answers-wrap.boolean")) {
-      handleTrueFalseAnswer(answer);
+      legacyAnswerHandled = handleTrueFalseAnswer(answer);
     } else if (document.querySelector(".answers-wrap.input-response")) {
-      handleFillInTheBlankAnswer(answer);
+      legacyAnswerHandled = await handleFillInTheBlankAnswer(answer);
     }
+
+    if (!legacyAnswerHandled) {
+      throw new Error("Could not apply AI answer to the current question");
+    }
+    markCurrentQuestionAnswered();
 
     await continueAfterResponse([]);
   } finally {
@@ -1393,6 +1440,43 @@ function trimActionsAfterInToolSubmit(actions) {
   return actions.slice(0, submitIndex + 1);
 }
 
+function holdMainNextAfterLocalAnswer(actions) {
+  const hasLocalAnswer = actions.some(
+    (action) => isAnswerAction(action) && getActionFrame(action) !== "main"
+  );
+  const hasMainNext = actions.some((action) => isMainNextAction(action));
+  if (!hasLocalAnswer || !hasMainNext) {
+    return { actions, held: false };
+  }
+
+  const filteredActions = actions.filter((action) => !isMainNextAction(action));
+  debugLog(
+    "main_next_held_after_local_answer",
+    { actions, filteredActions },
+    "warn"
+  );
+  return { actions: filteredActions, held: true };
+}
+
+function isMainNextAction(action) {
+  if (action.intent !== "next" && !isMovementAction(action)) return false;
+
+  const control = findLastControlForAction(action);
+  if (!control || control.frame !== "main") return false;
+
+  const text = `${control.label || ""} ${control.text || ""} ${
+    control.nearbyText || ""
+  }`;
+  return /\bnext\b/i.test(text);
+}
+
+function getActionFrame(action) {
+  const control = findLastControlForAction(action);
+  if (control) return control.frame;
+  const target = findElementDeep(action.selector);
+  return target?.ownerDocument === document ? "main" : "embedded";
+}
+
 function isInToolSubmitAction(action) {
   if (
     action.action !== "click" &&
@@ -1403,15 +1487,18 @@ function isInToolSubmitAction(action) {
 
   const control = findLastControlForAction(action);
   if (!control) return false;
+  if (control.frame === "main") return false;
+
+  // Trust the AI's intent annotation: any iframe action it labelled as a
+  // movement is treated as an in-tool save and trims everything after it.
+  // This is what blocks queued main-page Next actions from firing on the
+  // next sub-question after the embedded tool auto-advanced.
+  if (["submit", "continue"].includes(action.intent)) return true;
 
   const text = `${control.label || ""} ${control.text || ""} ${
     control.nearbyText || ""
   }`;
-
-  return (
-    control.frame !== "main" &&
-    /\b(record entry|save entry|save transaction)\b/i.test(text)
-  );
+  return /\b(record entry|save entry|save transaction)\b/i.test(text);
 }
 
 function expandWorksheetValueActions(actions, answer) {
@@ -1611,30 +1698,6 @@ function findAnswerLabelForValue(answer, value, usedLabels) {
   return match ? match[0] : null;
 }
 
-function guardUnsafeMovementActions(actions) {
-  if (!lastQuestionData || lastQuestionData.type !== "connect_page_snapshot") {
-    return { blocked: false, setupActions: [], reason: "" };
-  }
-
-  const hasAnswerAction = actions.some((action) => isAnswerAction(action));
-  if (hasAnswerAction) return { blocked: false, setupActions: [], reason: "" };
-  if (isPreviouslyCorrectQuestion()) {
-    return { blocked: false, setupActions: [], reason: "" };
-  }
-
-  const movementActions = actions.filter((action) => isMovementAction(action));
-  if (!movementActions.length) {
-    return { blocked: false, setupActions: [], reason: "" };
-  }
-
-  const setupActions = actions.filter((action) => isSetupAction(action));
-  return {
-    blocked: true,
-    setupActions,
-    reason: "blocked_movement_without_answer",
-  };
-}
-
 function isAnswerAction(action) {
   return (
     action.intent === "answer" &&
@@ -1652,18 +1715,6 @@ function isMovementAction(action) {
     control?.nearbyText || ""
   }`;
   return /\b(next|submit|check my work|hand in|finish)\b/i.test(text);
-}
-
-function isSetupAction(action) {
-  if (action.intent !== "continue") return false;
-
-  const control = findLastControlForAction(action);
-  const text = `${control?.label || ""} ${control?.text || ""} ${
-    control?.nearbyText || ""
-  }`;
-  return /\b(edit|view|open|worksheet|journal entry|transaction list|add)\b/i.test(
-    text
-  );
 }
 
 function buildActionsFromAnswer(answer) {
@@ -1790,7 +1841,7 @@ async function executeActions(actions) {
 
 function findElementDeep(selector) {
   for (const frame of getAccessibleDocuments()) {
-    const elements = Array.from(frame.doc.querySelectorAll(selector));
+    const elements = querySelectorAllSafe(frame.doc, selector);
     if (!elements.length) continue;
     const visibleElement = elements.find(
       (element) =>
@@ -1804,8 +1855,39 @@ function findElementDeep(selector) {
   return null;
 }
 
+function querySelectorAllSafe(doc, selector) {
+  try {
+    return Array.from(doc.querySelectorAll(selector));
+  } catch (error) {
+    debugLog("query_selector_invalid", { selector, error }, "error");
+    return [];
+  }
+}
+
 function clickElement(element) {
-  debugLog("click_element", { element });
+  const text = normalizeWhitespace(
+    element.innerText ||
+      element.textContent ||
+      element.value ||
+      element.getAttribute("aria-label") ||
+      ""
+  ).slice(0, 120);
+  const frame = element.ownerDocument === document ? "main" : "iframe";
+  const isMainNextish =
+    frame === "main" && /\b(next|submit|hand in|finish)\b/i.test(text);
+  const marker = isMainNextish ? ">>> MAIN-NEXT/SUBMIT CLICK" : "click";
+  console.log(
+    `[AutoMcGraw][${marker}]`,
+    `frame=${frame}`,
+    `tag=${element.tagName}`,
+    `text="${text}"`,
+    `id="${element.id || ""}"`,
+    `aria="${element.getAttribute("aria-label") || ""}"`,
+    `progress=${getProgress?.()?.current || "?"}/${getProgress?.()?.total || "?"}`,
+    `activeTab="${getActiveAssessmentTabLabel?.() || ""}"`,
+    element
+  );
+  debugLog("click_element", { element, text, frame, isMainNextish });
   element.scrollIntoView({ block: "center", inline: "center" });
   element.focus?.();
   dispatchMouseSequence(element, { includeClick: false });
@@ -2288,14 +2370,40 @@ function setAutomationDiagnostic(message) {
 
 async function continueAfterResponse(actions) {
   if (!isAutomating) return;
+  const shouldHoldMainNextAfterLocalAnswer = heldMainNextAfterLocalAnswer;
+  heldMainNextAfterLocalAnswer = false;
+  const continueDecisionFlags = {
+    held: shouldHoldMainNextAfterLocalAnswer,
+    resnapshot: shouldResnapshotAfterActions(actions),
+    inToolSubmit: shouldResnapshotAfterInToolSubmit(actions),
+    snapshotType: lastQuestionData?.type || "",
+  };
+  console.log(
+    "[AutoMcGraw][POST-ACTIONS]",
+    `progress=${getProgress()?.current || "?"}/${getProgress()?.total || "?"}`,
+    `activeTab="${getActiveAssessmentTabLabel() || ""}"`,
+    "decision=",
+    continueDecisionFlags
+  );
   debugLog("continue_after_response_start", {
     actionCount: actions.length,
     actions,
-    shouldResnapshot: shouldResnapshotAfterActions(actions),
-    shouldContinueAfterInToolSubmit: shouldResnapshotAfterInToolSubmit(actions),
+    shouldHoldMainNextAfterLocalAnswer,
+    shouldResnapshot: continueDecisionFlags.resnapshot,
+    shouldContinueAfterInToolSubmit: continueDecisionFlags.inToolSubmit,
   });
 
   if (lastQuestionData && lastQuestionData.type === "connect_page_snapshot") {
+    if (shouldHoldMainNextAfterLocalAnswer) {
+      setTimeout(() => {
+        if (isAutomating) {
+          debugLog("continue_after_response_held_main_next_resnapshot");
+          checkForNextStep();
+        }
+      }, 1200);
+      return;
+    }
+
     if (
       shouldResnapshotAfterActions(actions) ||
       shouldResnapshotAfterInToolSubmit(actions)
@@ -2395,6 +2503,15 @@ function shouldResnapshotAfterInToolSubmit(actions) {
 }
 
 async function continueAfterInToolSubmit() {
+  console.log(
+    "[AutoMcGraw][POST-SAVE]",
+    `progress=${getProgress()?.current || "?"}/${getProgress()?.total || "?"}`,
+    `activeTab="${getActiveAssessmentTabLabel() || ""}"`,
+    `visibleTabs=${JSON.stringify(getVisibleAssessmentTabLabels())}`,
+    `answeredWorkUnits=${JSON.stringify(
+      Array.from(answeredAssessmentWorkUnitIds)
+    )}`
+  );
   debugLog("continue_after_in_tool_submit_start");
   const saveSettled = await waitForInToolSaveToSettle();
   debugLog("continue_after_in_tool_submit_save_settled", { saveSettled });
@@ -2435,19 +2552,23 @@ async function continueAfterInToolSubmit() {
     return;
   }
 
-  if (hasVisibleInToolAnswerEditor()) {
-    debugLog("continue_after_in_tool_submit_editor_still_visible");
-    checkForNextStep();
-    return;
-  }
-
-  await advanceConnectPageIfNeeded([]);
+  // Don't proactively click another Required tab here. Our per-tab work-unit
+  // tracker marks a tab "answered" the moment ANY single subpart inside it
+  // gets an answer action, but McGraw worksheets often have their own
+  // internal paginator (e.g. "< 1 [2] >") inside a single tab. Jumping to the
+  // next tab in that case skips the remaining internal subparts.
+  //
+  // Record entry already auto-advances the embedded tool — within the
+  // current tab when more subparts remain, and (per McGraw's behavior)
+  // typically to the next tab when the current tab is fully done. Just
+  // re-snapshot and let the AI / page handle navigation. The AI's prompt
+  // tells it to click a tab control itself when no save button is visible.
   setTimeout(() => {
     if (isAutomating) {
-      debugLog("continue_after_in_tool_submit_snapshot_after_advance");
+      debugLog("continue_after_in_tool_submit_resnapshot_for_decision");
       checkForNextStep();
     }
-  }, 1800);
+  }, 1200);
 }
 
 async function waitForInToolSaveToSettle(timeout = 5000) {
@@ -2938,7 +3059,7 @@ function getProgress() {
   const totalMatch = text.match(/\bof\s+(\d+)\b/i);
   if (!match && !totalMatch) return null;
 
-  const current = getCurrentQuestionNumber() || (match ? parseInt(match[1], 10) : null);
+  const current = match ? parseInt(match[1], 10) : getCurrentQuestionNumber();
   const total = totalMatch
     ? parseInt(totalMatch[1], 10)
     : parseInt(match[2], 10);
@@ -2955,7 +3076,7 @@ function getCurrentQuestionNumber() {
     document.title,
     document.querySelector(".question__number-wrap")?.textContent,
     document.querySelector("#question-info-holder")?.textContent,
-    document.body?.innerText,
+    document.querySelector(".footer__progress__heading")?.textContent,
   ];
 
   for (const source of sources) {
@@ -2969,7 +3090,7 @@ function getCurrentQuestionNumber() {
 }
 
 function markCurrentQuestionAnswered() {
-  const questionNumber = getCurrentQuestionNumber();
+  const questionNumber = getCurrentQuestionNumber() || getProgress()?.current;
   if (!questionNumber) {
     debugLog("mark_question_answered_missing_question_number", {}, "warn");
     return;
@@ -2986,6 +3107,20 @@ function markCurrentQuestionAnswered() {
     answeredAssessmentWorkUnitIds: Array.from(answeredAssessmentWorkUnitIds),
     lastAnswerActionAt,
   });
+}
+
+function isCurrentWorkUnitAlreadyAnswered() {
+  const questionNumber = getCurrentQuestionNumber() || getProgress()?.current;
+  if (!questionNumber) return false;
+
+  const currentWorkUnits = getCurrentAssessmentWorkUnitIds(questionNumber);
+  if (currentWorkUnits.length) {
+    return currentWorkUnits.every((workUnitId) =>
+      answeredAssessmentWorkUnitIds.has(workUnitId)
+    );
+  }
+
+  return answeredQuestionNumbers.has(questionNumber);
 }
 
 function canAutoSubmitAssignment() {
@@ -3097,24 +3232,46 @@ function isPreviouslyCorrectQuestion() {
 function handleMultipleChoiceAnswer(answer) {
   const radioButtons = document.querySelectorAll('.answers--mc input[type="radio"]');
   const labels = document.querySelectorAll(".answers--mc .answer__label--mc");
+  const answerText = getPrimaryAnswerText(answer);
+  const normalizedAnswer = normalizeComparable(answerText);
 
   for (let i = 0; i < labels.length; i++) {
     const labelText = labels[i].textContent.trim().replace(/^[a-z]\s+/, "");
+    const normalizedLabel = normalizeComparable(labelText);
 
     if (
-      labelText === answer ||
-      labelText.replace(/\.$/, "") === answer.replace(/\.$/, "") ||
-      labelText.includes(answer) ||
-      answer.includes(labelText)
+      normalizedLabel === normalizedAnswer ||
+      (normalizedLabel &&
+        normalizedAnswer &&
+        (normalizedLabel.includes(normalizedAnswer) ||
+          normalizedAnswer.includes(normalizedLabel)))
     ) {
+      if (!radioButtons[i]) {
+        debugLog("multiple_choice_radio_missing", { answer, labelText }, "error");
+        return false;
+      }
       clickElement(radioButtons[i]);
-      break;
+      return true;
     }
   }
+
+  debugLog("multiple_choice_no_match", { answer, answerText }, "error");
+  return false;
 }
 
 function handleTrueFalseAnswer(answer) {
   const buttons = document.querySelectorAll(".answer--boolean");
+  const normalizedAnswer = normalizeComparable(getPrimaryAnswerText(answer));
+  const expected =
+    answer === true || normalizedAnswer === "true"
+      ? "true"
+      : answer === false || normalizedAnswer === "false"
+      ? "false"
+      : "";
+  if (!expected) {
+    debugLog("true_false_invalid_answer", { answer }, "error");
+    return false;
+  }
 
   for (const button of buttons) {
     const buttonSpan = button.querySelector(".answer__button--boolean");
@@ -3126,26 +3283,37 @@ function handleTrueFalseAnswer(answer) {
     const buttonText = fullText.trim().split(",")[0].trim();
 
     if (
-      (buttonText === "True" && (answer === "True" || answer === true)) ||
-      (buttonText === "False" && (answer === "False" || answer === false))
+      (buttonText === "True" && expected === "true") ||
+      (buttonText === "False" && expected === "false")
     ) {
       clickElement(button);
-      return;
+      return true;
     }
   }
 
-  console.error("No matching button found for answer:", answer);
+  debugLog("true_false_no_match", { answer }, "error");
+  return false;
 }
 
-function handleFillInTheBlankAnswer(answer) {
+async function handleFillInTheBlankAnswer(answer) {
   const inputField = document.querySelector(".answer--input__input");
 
   if (inputField) {
-    const answerText = Array.isArray(answer) ? answer[0] : answer;
-    fillElement(inputField, answerText);
-  } else {
-    console.error("Could not find input field for fill in the blank");
+    await fillElement(inputField, getPrimaryAnswerText(answer));
+    return true;
   }
+
+  debugLog("fill_blank_input_missing", { answer }, "error");
+  return false;
+}
+
+function getPrimaryAnswerText(answer) {
+  if (Array.isArray(answer)) return answer[0] == null ? "" : String(answer[0]);
+  if (answer == null) return "";
+  if (typeof answer === "object" && "answer" in answer) {
+    return getPrimaryAnswerText(answer.answer);
+  }
+  return String(answer);
 }
 
 function addAssistantButton() {
@@ -3163,7 +3331,7 @@ function addAssistantButton() {
   `;
 
   const btn = document.createElement("button");
-  btn.textContent = "Ask ChatGPT";
+  btn.textContent = "Ask AI";
   btn.type = "button";
   btn.className = "header__automcgraw--main";
   btn.style.cssText = `
@@ -3197,7 +3365,7 @@ function addAssistantButton() {
       stopAutomation("Manual stop");
     } else {
       const proceed = confirm(
-        "Start automation with ChatGPT? It will answer the current item and continue forward when possible.\n\nClick OK to begin, or Cancel to stop."
+        "Start automation with your selected AI assistant? It will answer the current item and continue forward when possible.\n\nClick OK to begin, or Cancel to stop."
       );
       if (proceed) {
         isAutomating = true;
@@ -3267,7 +3435,9 @@ function addAssistantButton() {
 function getElementLabel(element) {
   const doc = element.ownerDocument;
   const id = element.id;
-  const explicitLabel = id ? doc.querySelector(`label[for="${cssEscape(id)}"]`) : null;
+  const explicitLabel = id
+    ? doc.querySelector(attributeSelector("for", id))
+    : null;
 
   return normalizeWhitespace(
     element.getAttribute("aria-label") ||
@@ -3410,13 +3580,6 @@ function limitText(text, maxLength) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function cssEscape(value) {
-  if (window.CSS && typeof window.CSS.escape === "function") {
-    return window.CSS.escape(value);
-  }
-  return String(value).replace(/["\\]/g, "\\$&");
 }
 
 function attributeSelector(name, value) {

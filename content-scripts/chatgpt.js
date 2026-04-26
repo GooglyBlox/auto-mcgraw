@@ -404,6 +404,14 @@ function buildConnectSnapshotPrompt(questionData, baseText) {
   text +=
     '\nDo not include next or submit actions when the current answer fields are blank or only a setup/editor-opening control is visible.';
   text +=
+    '\nIf the current worksheet is already filled and saved, return the appropriate in-tool next/continue action instead of re-answering that same worksheet.';
+  text +=
+    "\nCRITICAL: An embedded tool's save button (e.g. Record entry, Save entry, Save & Next, Save transaction, Submit) advances to the next sub-question on its own when there are more sub-questions, or completes the worksheet when there are none. Make that save button the FINAL action of your response. Do NOT add any subsequent click, next, submit, continue, or tab-navigation action after it — including a main-page Next. The harness will re-snapshot and prompt you again for whatever the embedded tool shows next.";
+  text +=
+    '\nIf the embedded tool exposes Required tabs, sub-page steps, or transaction buttons but no visible save button on the current sub-part, click the relevant navigation control as the final action and stop there. The harness will re-snapshot for the next sub-part.';
+  text +=
+    '\nOnly include a main-page Next or final Submit action when there are NO answer fields, NO embedded save buttons, and NO embedded sub-part navigation visible — i.e., the only meaningful interactive control left is the main-page navigation itself.';
+  text +=
     '\nUse "click" for radio/checkbox/button choices, "fill" for text inputs/textareas/contenteditable elements, and "select" with a "value" for native selects, dropdowns, and combobox cells.';
   text +=
     "\nFor spreadsheet-style statement tables, selecting the row label is not enough. If an amount belongs on that row, also add a fill action for the blank amount/value cell in the same row, using the selector for that numeric response cell.";

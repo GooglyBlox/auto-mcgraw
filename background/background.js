@@ -13,9 +13,36 @@ let pendingResponse = null;
 let backgroundDebugLogs = [];
 const BG_DEBUG_LOG_KEY = "automcgraw.backgroundDebugLogs.v1";
 const DEBUG_MAX_LOGS = 600;
-const DEEPSEEK_URL_PATTERNS = [
-  "https://chat.deepseek.com/*",
+const MHE_URL_PATTERNS = [
+  "https://learning.mheducation.com/*",
+  "https://ezto.mheducation.com/*",
+  "https://newconnect.mheducation.com/*",
 ];
+const MHE_HOSTS = [
+  "learning.mheducation.com",
+  "ezto.mheducation.com",
+  "newconnect.mheducation.com",
+];
+const AI_MODELS = {
+  chatgpt: {
+    tabQuery: { url: "https://chatgpt.com/*" },
+    hosts: ["chatgpt.com"],
+  },
+  gemini: {
+    tabQuery: { url: "https://gemini.google.com/*" },
+    hosts: ["gemini.google.com"],
+  },
+  deepseek: {
+    tabQuery: { url: ["https://chat.deepseek.com/*"] },
+    hosts: ["chat.deepseek.com", "deepseek.chat"],
+    preferredHost: "chat.deepseek.com",
+  },
+};
+const AI_RESPONSE_MODEL_BY_MESSAGE_TYPE = {
+  chatGPTResponse: "chatgpt",
+  geminiResponse: "gemini",
+  deepseekResponse: "deepseek",
+};
 
 function debugLog(event, details = {}, level = "debug") {
   const entry = {
@@ -100,8 +127,30 @@ function sanitizeDebugValue(value, depth = 0) {
   return String(value);
 }
 
-function isDeepSeekTabUrl(url = "") {
-  return url.includes("chat.deepseek.com") || url.includes("deepseek.chat");
+function isMheTabUrl(url = "") {
+  return MHE_HOSTS.some((host) => url.includes(host));
+}
+
+function getAiModelForUrl(url = "") {
+  return (
+    Object.entries(AI_MODELS).find(([, config]) =>
+      config.hosts.some((host) => url.includes(host))
+    )?.[0] || null
+  );
+}
+
+function pickPreferredAiTab(aiModel, tabs) {
+  const preferredHost = AI_MODELS[aiModel]?.preferredHost;
+  if (!preferredHost) return tabs[0];
+  return (
+    tabs.find((tab) => tab.url && tab.url.includes(preferredHost)) || tabs[0]
+  );
+}
+
+function resolveAiModel(preferredModel, storedModel) {
+  if (AI_MODELS[preferredModel]) return preferredModel;
+  if (AI_MODELS[storedModel]) return storedModel;
+  return "chatgpt";
 }
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
@@ -187,11 +236,7 @@ async function focusTab(tabId) {
 async function findAndStoreTabs(preferredModel = null) {
   debugLog("find_tabs_start", { preferredModel });
   const mheTabs = await chrome.tabs.query({
-    url: [
-      "https://learning.mheducation.com/*",
-      "https://ezto.mheducation.com/*",
-      "https://newconnect.mheducation.com/*",
-    ],
+    url: MHE_URL_PATTERNS,
   });
   if (mheTabs.length > 0) {
     const preferredMheTab =
@@ -201,41 +246,20 @@ async function findAndStoreTabs(preferredModel = null) {
   }
 
   const data = await chrome.storage.sync.get("aiModel");
-  const aiModel = preferredModel || data.aiModel || "chatgpt";
+  const aiModel = resolveAiModel(preferredModel, data.aiModel);
   aiType = aiModel;
 
-  if (aiModel === "chatgpt") {
-    const tabs = await chrome.tabs.query({ url: "https://chatgpt.com/*" });
-    if (tabs.length > 0) {
-      aiTabId = tabs[0].id;
-      aiWindowId = tabs[0].windowId;
-    } else {
-      aiTabId = null;
-    }
-  } else if (aiModel === "gemini") {
-    const tabs = await chrome.tabs.query({
-      url: "https://gemini.google.com/*",
-    });
-    if (tabs.length > 0) {
-      aiTabId = tabs[0].id;
-      aiWindowId = tabs[0].windowId;
-    } else {
-      aiTabId = null;
-    }
-  } else if (aiModel === "deepseek") {
-    const tabs = await chrome.tabs.query({
-      url: DEEPSEEK_URL_PATTERNS,
-    });
-    if (tabs.length > 0) {
-      const preferredTab =
-        tabs.find((tab) => tab.url && tab.url.includes("chat.deepseek.com")) ||
-        tabs[0];
-      aiTabId = preferredTab.id;
-      aiWindowId = preferredTab.windowId;
-    } else {
-      aiTabId = null;
-    }
+  const aiModelConfig = AI_MODELS[aiModel];
+  const aiTabs = await chrome.tabs.query(aiModelConfig.tabQuery);
+  if (aiTabs.length > 0) {
+    const preferredTab = pickPreferredAiTab(aiModel, aiTabs);
+    aiTabId = preferredTab.id;
+    aiWindowId = preferredTab.windowId;
+  } else {
+    aiTabId = null;
+    aiWindowId = null;
   }
+
   debugLog("find_tabs_complete", {
     preferredModel,
     aiModel,
@@ -364,11 +388,7 @@ async function processResponse(message) {
 
     if (!mheTabId) {
       const mheTabs = await chrome.tabs.query({
-        url: [
-          "https://learning.mheducation.com/*",
-          "https://ezto.mheducation.com/*",
-          "https://newconnect.mheducation.com/*",
-        ],
+        url: MHE_URL_PATTERNS,
       });
       if (mheTabs.length > 0) {
         mheTabId = mheTabs[0].id;
@@ -380,13 +400,7 @@ async function processResponse(message) {
     }
 
     const responseModel =
-      message.type === "chatGPTResponse"
-        ? "chatgpt"
-        : message.type === "geminiResponse"
-        ? "gemini"
-        : message.type === "deepseekResponse"
-        ? "deepseek"
-        : null;
+      AI_RESPONSE_MODEL_BY_MESSAGE_TYPE[message.type] || null;
     const sameWindow = await shouldFocusTabs(responseModel);
 
     if (sameWindow) {
@@ -470,27 +484,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.tab) {
     message.sourceTabId = sender.tab.id;
 
-    if (
-      sender.tab.url.includes("learning.mheducation.com") ||
-      sender.tab.url.includes("ezto.mheducation.com") ||
-      sender.tab.url.includes("newconnect.mheducation.com")
-    ) {
+    const senderUrl = sender.tab.url || "";
+    const senderAiModel = getAiModelForUrl(senderUrl);
+
+    if (isMheTabUrl(senderUrl)) {
       if (!originalTabId && !duplicateTabId) {
         mheTabId = sender.tab.id;
         mheWindowId = sender.tab.windowId;
       }
-    } else if (sender.tab.url.includes("chatgpt.com")) {
+    } else if (senderAiModel) {
       aiTabId = sender.tab.id;
       aiWindowId = sender.tab.windowId;
-      aiType = "chatgpt";
-    } else if (sender.tab.url.includes("gemini.google.com")) {
-      aiTabId = sender.tab.id;
-      aiWindowId = sender.tab.windowId;
-      aiType = "gemini";
-    } else if (isDeepSeekTabUrl(sender.tab.url || "")) {
-      aiTabId = sender.tab.id;
-      aiWindowId = sender.tab.windowId;
-      aiType = "deepseek";
+      aiType = senderAiModel;
     }
   }
 
