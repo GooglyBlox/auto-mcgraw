@@ -4,6 +4,18 @@
 
 <img src="assets/icon.png" alt="Auto-McGraw Logo" width="200">
 
+## Fork Notice
+
+This fork expands the original SmartBook-focused extension with broader McGraw Hill Connect support, including non-SmartBook assignments, embedded accounting worksheets, journal-entry style tools, and final submission handling.
+
+Major changes in this fork:
+
+- Connect snapshot automation with selector-based actions for complex page layouts
+- Prompt/action parity across ChatGPT, Gemini, and DeepSeek
+- Support for dropdowns, spreadsheet-style cells, journal entries, and negative accounting values
+- Safer worksheet navigation, including avoiding repeated Record entry / Save clicks on completed sub-questions
+- Improved handling for final Next / Submit behavior and assignment completion
+
 [![Release](https://img.shields.io/github/v/release/GooglyBlox/auto-mcgraw?include_prereleases&style=flat-square&cache=1)](https://github.com/GooglyBlox/auto-mcgraw/releases)
 [![License](https://img.shields.io/github/license/GooglyBlox/auto-mcgraw?style=flat-square&cache=1)](LICENSE)
 [![Downloads](https://img.shields.io/github/downloads/GooglyBlox/auto-mcgraw/total?style=flat-square&cache=1)](https://github.com/GooglyBlox/auto-mcgraw/releases)
