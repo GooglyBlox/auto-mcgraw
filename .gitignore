@@ -9,3 +9,4 @@ scripts/
 playwright-debug.log
 manual-debug-browser.log
 playwright-artifacts/
+.claude/
