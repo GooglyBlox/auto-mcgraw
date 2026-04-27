@@ -18,14 +18,15 @@
 
 ## Fork Notice
 
-This fork is based on [`GooglyBlox/auto-mcgraw`](https://github.com/GooglyBlox/auto-mcgraw) v2.4/main and keeps the original SmartBook flow while adding broader McGraw Hill Connect support.
+This fork is based on [`GooglyBlox/auto-mcgraw`](https://github.com/GooglyBlox/auto-mcgraw) (originally v2.4/main); the fork is currently at v2.5. The original SmartBook flow is preserved while adding broader McGraw Hill Connect support.
 
 Major changes compared with the original project:
 
 - Added Connect support for `ezto.mheducation.com` and `newconnect.mheducation.com`, including non-SmartBook page snapshots.
-- Added selector-driven action prompts for complex Connect layouts, embedded accounting tools, journal-entry worksheets, dropdowns, spreadsheet cells, and negative accounting values.
-- Brought Connect prompt/action support to ChatGPT, Gemini, and DeepSeek so all three providers receive the same controls, dropdown options, and action instructions.
-- Improved Connect navigation around worksheet saves, repeated Record entry / Save clicks, main Next behavior, and final assignment Submit handling.
+- Reworked the Connect path around a **slot-graph contract**: the page describes fillable slots (kind, label, options, hint) and the AI returns values keyed by slot id. The AI never sees DOM selectors, so the brittle "AI plans clicks" machinery is gone.
+- Deterministic page-side navigator handles Record entry, the accounting-tool transaction carousel (multi-sub-problem worksheets), Required tab switching (including labels like Req A1 / Req A2), main-page Next, and final assignment Submit.
+- Brought slot-graph prompt/response support to ChatGPT, Gemini, and DeepSeek so all three providers receive the same fillable-slot description.
+- Added a **Disable Auto-Submit** setting so automation stops at the final item instead of clicking Submit, letting you review and submit manually.
 - Added debug logging and routing improvements in the background and Connect content scripts to make tab/model selection and failures easier to diagnose.
 - Cleaned up local debug/dev artifacts so the packaged extension remains focused on runtime files.
 
