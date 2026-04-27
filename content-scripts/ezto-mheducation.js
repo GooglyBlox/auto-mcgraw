@@ -391,6 +391,19 @@ function getSelectedAiModel() {
   });
 }
 
+function getDisableAutoSubmit() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.sync.get("disableAutoSubmit", (data) => {
+        resolve(Boolean(data?.disableAutoSubmit));
+      });
+    } catch (error) {
+      debugLog("disable_auto_submit_fallback", { error }, "warn");
+      resolve(false);
+    }
+  });
+}
+
 // ============================================================================
 // Top-level flow
 // ============================================================================
@@ -1140,6 +1153,14 @@ async function navigateForward({ filledSlots }) {
   // 4. Final assignment Submit.
   const submit = findMainSubmitButton();
   if (submit && canAutoSubmitAssignment()) {
+    if (await getDisableAutoSubmit()) {
+      debugLog("navigate_submit_disabled_by_setting", { submit });
+      setAutomationDiagnostic("auto_submit_disabled");
+      stopAutomation(
+        "Auto-submit is disabled in settings. Review your answers and submit manually."
+      );
+      return true;
+    }
     debugLog("navigate_submit", { submit });
     clickElement(submit);
     await delay(800);

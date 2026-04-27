@@ -36,6 +36,9 @@ document.addEventListener("DOMContentLoaded", function () {
   const pauseBeforeSubmitToggle = document.getElementById(
     "pause-before-submit-toggle"
   );
+  const disableAutoSubmitToggle = document.getElementById(
+    "disable-auto-submit-toggle"
+  );
 
   const currentVersion = chrome.runtime.getManifest().version;
   let availabilityRequestId = 0;
@@ -58,11 +61,12 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 
   chrome.storage.sync.get(
-    ["doubleCreditMode", "randomConfidence", "pauseBeforeSubmit"],
+    ["doubleCreditMode", "randomConfidence", "pauseBeforeSubmit", "disableAutoSubmit"],
     function (data) {
       doubleCreditToggle.checked = data.doubleCreditMode || false;
       randomConfidenceToggle.checked = data.randomConfidence || false;
       pauseBeforeSubmitToggle.checked = data.pauseBeforeSubmit || false;
+      disableAutoSubmitToggle.checked = data.disableAutoSubmit || false;
     }
   );
 
@@ -76,6 +80,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
   pauseBeforeSubmitToggle.addEventListener("change", function () {
     chrome.storage.sync.set({ pauseBeforeSubmit: this.checked });
+  });
+
+  disableAutoSubmitToggle.addEventListener("change", function () {
+    chrome.storage.sync.set({ disableAutoSubmit: this.checked });
   });
 
   setInterval(() => {
