@@ -11,7 +11,6 @@
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
     "https://chat.deepseek.com/*",
-    "https://deepseek.chat/*",
     "https://api.github.com/*"
   ],
   "background": {
@@ -56,16 +55,6 @@
         "content-scripts/shared/ai-prompt.js",
         "content-scripts/deepseek.js"
       ]
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "popup/settings.html",
-        "popup/settings.css",
-        "popup/settings.js"
-      ],
-      "matches": ["<all_urls>"]
     }
   ]
 }
