@@ -2,9 +2,26 @@ let hasResponded = false;
 let messageCountAtQuestion = 0;
 let observationStartTime = 0;
 let observationTimeout = null;
+let observationInterval = null;
 let observer = null;
+let responseInFlight = false;
+let lastSentResponseText = "";
+let assistantTextAtQuestion = "";
+let pendingCandidateText = "";
+let pendingCandidateSeenAt = 0;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "ping") {
+    sendResponse({ received: true });
+    return true;
+  }
+
+  if (message.type === "cancelResponseObservation") {
+    resetObservation();
+    sendResponse({ received: true });
+    return true;
+  }
+
   if (message.type === "receiveQuestion") {
     resetObservation();
 
@@ -12,6 +29,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       '[data-message-author-role="assistant"]'
     );
     messageCountAtQuestion = messages.length;
+    assistantTextAtQuestion = getLatestAssistantResponseText();
     hasResponded = false;
 
     insertQuestion(message.question)
@@ -28,9 +46,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 function resetObservation() {
   hasResponded = false;
+  responseInFlight = false;
+  observationStartTime = 0;
+  pendingCandidateText = "";
+  pendingCandidateSeenAt = 0;
   if (observationTimeout) {
     clearTimeout(observationTimeout);
     observationTimeout = null;
+  }
+  if (observationInterval) {
+    clearInterval(observationInterval);
+    observationInterval = null;
   }
   if (observer) {
     observer.disconnect();
@@ -39,68 +65,88 @@ function resetObservation() {
 }
 
 async function insertQuestion(questionData) {
-  const { type, question, options, previousCorrection } = questionData;
-  let text = `Type: ${type}\nQuestion: ${question}`;
+  const text = buildPrompt(questionData);
+  const inputArea = await waitForChatInput();
 
-  if (
-    previousCorrection &&
-    previousCorrection.question &&
-    previousCorrection.correctAnswer
-  ) {
-    text =
-      `CORRECTION FROM PREVIOUS ANSWER: For the question "${
-        previousCorrection.question
-      }", your answer was incorrect. The correct answer was: ${JSON.stringify(
-        previousCorrection.correctAnswer
-      )}\n\nNow answer this new question:\n\n` + text;
+  inputArea.focus();
+
+  if ("value" in inputArea) {
+    inputArea.value = text;
+    inputArea.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText",
+        data: text,
+      })
+    );
+  } else {
+    inputArea.textContent = "";
+    const inserted = document.execCommand("insertText", false, text);
+    if (!inserted) {
+      inputArea.textContent = text;
+    }
+    inputArea.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText",
+        data: text,
+      })
+    );
   }
 
-  if (type === "matching") {
-    text +=
-      "\nPrompts:\n" +
-      options.prompts.map((prompt, i) => `${i + 1}. ${prompt}`).join("\n");
-    text +=
-      "\nChoices:\n" +
-      options.choices.map((choice, i) => `${i + 1}. ${choice}`).join("\n");
-    text +=
-      '\n\nPlease match each prompt with the correct choice. Set "answer" to an array of strings using the exact format \'Prompt -> Choice\'. Include one entry per prompt, use exact prompt and choice text, and use each choice at most once.';
-  } else if (type === "fill_in_the_blank") {
-    text +=
-      "\n\nThis is a fill in the blank question. If there are multiple blanks, provide answers as an array in order of appearance. For a single blank, you can provide a string.";
-  } else if (options && options.length > 0) {
-    text +=
-      "\nOptions:\n" + options.map((opt, i) => `${i + 1}. ${opt}`).join("\n");
-    text +=
-      "\n\nIMPORTANT: Your answer must EXACTLY match one of the above options. Do not include numbers in your answer. If there are periods, include them.";
-  }
+  inputArea.dispatchEvent(new Event("change", { bubbles: true }));
 
-  text +=
-    '\n\nPlease provide your answer in JSON format with keys "answer" and "explanation". Explanations should be no more than one sentence. DO NOT acknowledge the correction in your response, only answer the new question.';
+  const sendButton = await waitForSendButton();
+  sendButton.click();
+  startObserving();
+}
+
+function waitForChatInput(timeout = 15000) {
+  return waitForElement(
+    [
+      "#prompt-textarea",
+      '[contenteditable="true"][data-lexical-editor="true"]',
+      'textarea[data-testid="prompt-textarea"]',
+      "textarea",
+    ],
+    timeout,
+    (element) => !element.disabled && !element.getAttribute("aria-disabled")
+  );
+}
+
+function waitForSendButton(timeout = 10000) {
+  return waitForElement(
+    [
+      '[data-testid="send-button"]',
+      'button[aria-label="Send prompt"]',
+      'button[aria-label="Send message"]',
+      'button[data-testid="fruitjuice-send-button"]',
+    ],
+    timeout,
+    (element) =>
+      !element.disabled && element.getAttribute("aria-disabled") !== "true"
+  );
+}
+
+function waitForElement(selectors, timeout, predicate = () => true) {
+  const startedAt = Date.now();
 
   return new Promise((resolve, reject) => {
-    const inputArea = document.getElementById("prompt-textarea");
-    if (inputArea) {
-      setTimeout(() => {
-        inputArea.focus();
-        inputArea.innerHTML = `<p>${text}</p>`;
-        inputArea.dispatchEvent(new Event("input", { bubbles: true }));
+    const interval = setInterval(() => {
+      for (const selector of selectors) {
+        const element = document.querySelector(selector);
+        if (element && predicate(element)) {
+          clearInterval(interval);
+          resolve(element);
+          return;
+        }
+      }
 
-        setTimeout(() => {
-          const sendButton = document.querySelector(
-            '[data-testid="send-button"]'
-          );
-          if (sendButton) {
-            sendButton.click();
-            startObserving();
-            resolve();
-          } else {
-            reject(new Error("Send button not found"));
-          }
-        }, 300);
-      }, 300);
-    } else {
-      reject(new Error("Input area not found"));
-    }
+      if (Date.now() - startedAt > timeout) {
+        clearInterval(interval);
+        reject(new Error(`Element not found: ${selectors.join(", ")}`));
+      }
+    }, 150);
   });
 }
 
@@ -108,78 +154,17 @@ function startObserving() {
   observationStartTime = Date.now();
   observationTimeout = setTimeout(() => {
     if (!hasResponded) {
+      notifyAiResponseTimeout();
       resetObservation();
     }
   }, 180000);
 
-  observer = new MutationObserver((mutations) => {
-    if (hasResponded) return;
+  observationInterval = setInterval(() => {
+    tryCaptureLatestResponse();
+  }, 1000);
 
-    const messages = document.querySelectorAll(
-      '[data-message-author-role="assistant"]'
-    );
-    if (!messages.length) return;
-
-    if (messages.length <= messageCountAtQuestion) return;
-
-    const latestMessage = messages[messages.length - 1];
-    const codeBlocks = latestMessage.querySelectorAll("pre code");
-    let responseText = "";
-
-    for (const block of codeBlocks) {
-      if (block.className.includes("language-json")) {
-        responseText = block.textContent.trim();
-        break;
-      }
-    }
-
-    if (!responseText) {
-      responseText = latestMessage.textContent.trim();
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) responseText = jsonMatch[0];
-    }
-
-    responseText = responseText
-      .replace(/[\u200B-\u200D\uFEFF]/g, "")
-      .replace(/\n\s*/g, " ")
-      .trim();
-
-    try {
-      const parsed = JSON.parse(responseText);
-      if (parsed.answer && !hasResponded) {
-        hasResponded = true;
-        chrome.runtime
-          .sendMessage({
-            type: "chatGPTResponse",
-            response: responseText,
-          })
-          .then(() => {
-            resetObservation();
-          })
-          .catch((error) => {
-            console.error("Error sending response:", error);
-          });
-      }
-    } catch (e) {
-      const isGenerating = latestMessage.querySelector(".result-streaming");
-      if (!isGenerating && Date.now() - observationStartTime > 30000) {
-        const responseText = latestMessage.textContent.trim();
-        try {
-          const jsonPattern =
-            /\{[\s\S]*?"answer"[\s\S]*?"explanation"[\s\S]*?\}/;
-          const jsonMatch = responseText.match(jsonPattern);
-
-          if (jsonMatch && !hasResponded) {
-            hasResponded = true;
-            chrome.runtime.sendMessage({
-              type: "chatGPTResponse",
-              response: jsonMatch[0],
-            });
-            resetObservation();
-          }
-        } catch (e) {}
-      }
-    }
+  observer = new MutationObserver(() => {
+    tryCaptureLatestResponse();
   });
 
   observer.observe(document.body, {
@@ -188,3 +173,137 @@ function startObserving() {
     characterData: true,
   });
 }
+
+function tryCaptureLatestResponse() {
+  if (responseInFlight || !observationStartTime) return;
+
+  const messages = document.querySelectorAll(
+    '[data-message-author-role="assistant"]'
+  );
+  if (messages.length <= messageCountAtQuestion) return;
+
+  const latestMessage = messages[messages.length - 1];
+  if (isResponseStillGenerating(latestMessage)) return;
+
+  const responseText = extractJsonText(latestMessage);
+  if (
+    !responseText ||
+    responseText === lastSentResponseText ||
+    responseText === assistantTextAtQuestion
+  ) {
+    return;
+  }
+
+  if (responseText !== pendingCandidateText) {
+    pendingCandidateText = responseText;
+    pendingCandidateSeenAt = Date.now();
+    return;
+  }
+
+  if (Date.now() - pendingCandidateSeenAt < 600) {
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(responseText);
+    if (parsed.answer !== undefined || parsed.slots) {
+      responseInFlight = true;
+      hasResponded = true;
+      chrome.runtime
+        .sendMessage({
+          type: "chatGPTResponse",
+          response: responseText,
+        })
+        .then(() => {
+          lastSentResponseText = responseText;
+          resetObservation();
+        })
+        .catch((error) => {
+          responseInFlight = false;
+          hasResponded = false;
+          console.error("Error sending response:", error);
+        });
+    }
+  } catch (error) {
+    if (Date.now() - observationStartTime > 30000) {
+      const fallback = findJsonObject(latestMessage.textContent.trim());
+      if (
+        !fallback ||
+        fallback === lastSentResponseText ||
+        fallback === assistantTextAtQuestion
+      ) {
+        return;
+      }
+      let fallbackParsed;
+      try {
+        fallbackParsed = JSON.parse(fallback);
+      } catch (_) {
+        return;
+      }
+      if (fallbackParsed.answer === undefined && !fallbackParsed.slots) {
+        return;
+      }
+      responseInFlight = true;
+      hasResponded = true;
+      chrome.runtime
+        .sendMessage({
+          type: "chatGPTResponse",
+          response: fallback,
+        })
+        .then(() => {
+          lastSentResponseText = fallback;
+          resetObservation();
+        })
+        .catch((sendError) => {
+          responseInFlight = false;
+          hasResponded = false;
+          console.error("Error sending fallback response:", sendError);
+        });
+    }
+  }
+}
+
+function notifyAiResponseTimeout() {
+  try {
+    chrome.runtime.sendMessage({
+      type: "aiResponseTimeout",
+      aiModel: "chatgpt",
+      reason: "ChatGPT did not produce a response within 180 seconds.",
+    });
+  } catch (error) {
+    console.error("Error notifying timeout:", error);
+  }
+}
+
+function isResponseStillGenerating(message) {
+  return Boolean(
+    document.querySelector('[data-testid="stop-button"]') ||
+      message.querySelector(".result-streaming") ||
+      message
+        .closest('[data-message-author-role="assistant"]')
+        ?.querySelector('[aria-label*="Stop"], [data-testid*="stop"]')
+  );
+}
+
+function getLatestAssistantResponseText() {
+  const messages = document.querySelectorAll(
+    '[data-message-author-role="assistant"]'
+  );
+  if (!messages.length) return "";
+
+  const latestMessage = messages[messages.length - 1];
+  return extractJsonText(latestMessage);
+}
+
+function extractJsonText(message) {
+  const codeBlocks = message.querySelectorAll("pre code");
+
+  for (const block of codeBlocks) {
+    const text = sanitizeResponseText(block.textContent);
+    if (looksLikeJsonResponse(text)) return text;
+  }
+
+  const text = sanitizeResponseText(message.textContent);
+  return findJsonObject(text);
+}
+

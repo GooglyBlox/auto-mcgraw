@@ -7,10 +7,10 @@
   "host_permissions": [
     "https://learning.mheducation.com/*",
     "https://ezto.mheducation.com/*",
+    "https://newconnect.mheducation.com/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
     "https://chat.deepseek.com/*",
-    "https://deepseek.chat/*",
     "https://api.github.com/*"
   ],
   "background": {
@@ -29,30 +29,32 @@
       "js": ["content-scripts/mheducation.js"]
     },
     {
-      "matches": ["https://ezto.mheducation.com/*"],
+      "matches": [
+        "https://ezto.mheducation.com/*",
+        "https://newconnect.mheducation.com/*"
+      ],
       "js": ["content-scripts/ezto-mheducation.js"]
     },
     {
       "matches": ["https://chatgpt.com/*"],
-      "js": ["content-scripts/chatgpt.js"]
+      "js": [
+        "content-scripts/shared/ai-prompt.js",
+        "content-scripts/chatgpt.js"
+      ]
     },
     {
       "matches": ["https://gemini.google.com/*"],
-      "js": ["content-scripts/gemini.js"]
+      "js": [
+        "content-scripts/shared/ai-prompt.js",
+        "content-scripts/gemini.js"
+      ]
     },
     {
       "matches": ["https://chat.deepseek.com/*"],
-      "js": ["content-scripts/deepseek.js"]
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "popup/settings.html",
-        "popup/settings.css",
-        "popup/settings.js"
-      ],
-      "matches": ["<all_urls>"]
+      "js": [
+        "content-scripts/shared/ai-prompt.js",
+        "content-scripts/deepseek.js"
+      ]
     }
   ]
 }
