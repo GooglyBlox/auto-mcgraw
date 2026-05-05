@@ -34,15 +34,24 @@
     },
     {
       "matches": ["https://chatgpt.com/*"],
-      "js": ["content-scripts/chatgpt.js"]
+      "js": [
+        "content-scripts/shared/ai-prompt.js",
+        "content-scripts/chatgpt.js"
+      ]
     },
     {
       "matches": ["https://gemini.google.com/*"],
-      "js": ["content-scripts/gemini.js"]
+      "js": [
+        "content-scripts/shared/ai-prompt.js",
+        "content-scripts/gemini.js"
+      ]
     },
     {
       "matches": ["https://chat.deepseek.com/*"],
-      "js": ["content-scripts/deepseek.js"]
+      "js": [
+        "content-scripts/shared/ai-prompt.js",
+        "content-scripts/deepseek.js"
+      ]
     }
   ],
   "web_accessible_resources": [
