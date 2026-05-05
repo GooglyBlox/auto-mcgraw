@@ -678,7 +678,6 @@ function isNavigationChrome(element) {
 
 async function applySlots(slotAnswers) {
   let filledAny = false;
-  let appliedCount = 0;
   let errored = false;
   const entries = Object.entries(slotAnswers || {});
 
@@ -695,7 +694,6 @@ async function applySlots(slotAnswers) {
     try {
       await applySlot(slot, value);
       filledAny = true;
-      appliedCount++;
     } catch (error) {
       errored = true;
     }
@@ -844,9 +842,6 @@ async function navigateForward({ filledSlots }) {
     return true;
   }
 
-  if (submit) {
-  }
-
   return false;
 }
 
@@ -857,8 +852,6 @@ async function advanceWithinCarouselAfterSave(beforeActiveNumber) {
     if (!isAutomating) return false;
     const currentActive = getActiveTransactionNumberAcrossFrames();
     if (currentActive != null && currentActive > beforeActiveNumber) {
-      const unentered = activeTransactionIsUnentered();
-      const activeText = getActiveTransactionAnnotationText();
       return true;
     }
     await delay(150);
@@ -2274,8 +2267,7 @@ function getAssessmentTabLabel(tab) {
 function addAssistantButton() {
   const helpLink = document.querySelector(".header__help");
   const headerExits = document.querySelector(".header__exits");
-  const insertionTarget = helpLink || headerExits || document.body;
-  if (!insertionTarget) return;
+  if (!helpLink && !headerExits && !document.body) return;
 
   const buttonContainer = document.createElement("div");
   buttonContainer.className = "header__automcgraw";
