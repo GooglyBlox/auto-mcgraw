@@ -7,6 +7,7 @@
   "host_permissions": [
     "https://learning.mheducation.com/*",
     "https://ezto.mheducation.com/*",
+    "https://newconnect.mheducation.com/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
     "https://chat.deepseek.com/*",
@@ -29,7 +30,10 @@
       "js": ["content-scripts/mheducation.js"]
     },
     {
-      "matches": ["https://ezto.mheducation.com/*"],
+      "matches": [
+        "https://ezto.mheducation.com/*",
+        "https://newconnect.mheducation.com/*"
+      ],
       "js": ["content-scripts/ezto-mheducation.js"]
     },
     {

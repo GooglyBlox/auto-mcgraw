@@ -14,8 +14,13 @@ let pendingResponse = null;
 const MHE_URL_PATTERNS = [
   "https://learning.mheducation.com/*",
   "https://ezto.mheducation.com/*",
+  "https://newconnect.mheducation.com/*",
 ];
-const MHE_HOSTS = ["learning.mheducation.com", "ezto.mheducation.com"];
+const MHE_HOSTS = [
+  "learning.mheducation.com",
+  "ezto.mheducation.com",
+  "newconnect.mheducation.com",
+];
 const AI_MODELS = {
   chatgpt: {
     tabQuery: { url: "https://chatgpt.com/*" },
