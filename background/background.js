@@ -10,12 +10,48 @@ let originalTabId = null;
 let storedResponse = null;
 let isProcessingDuplicate = false;
 let pendingResponse = null;
-const DEEPSEEK_URL_PATTERNS = [
-  "https://chat.deepseek.com/*",
-];
 
-function isDeepSeekTabUrl(url = "") {
-  return url.includes("chat.deepseek.com") || url.includes("deepseek.chat");
+const MHE_URL_PATTERNS = [
+  "https://learning.mheducation.com/*",
+  "https://ezto.mheducation.com/*",
+];
+const MHE_HOSTS = ["learning.mheducation.com", "ezto.mheducation.com"];
+const AI_MODELS = {
+  chatgpt: {
+    tabQuery: { url: "https://chatgpt.com/*" },
+    hosts: ["chatgpt.com"],
+  },
+  gemini: {
+    tabQuery: { url: "https://gemini.google.com/*" },
+    hosts: ["gemini.google.com"],
+  },
+  deepseek: {
+    tabQuery: { url: ["https://chat.deepseek.com/*"] },
+    hosts: ["chat.deepseek.com"],
+  },
+};
+const AI_RESPONSE_MODEL_BY_MESSAGE_TYPE = {
+  chatGPTResponse: "chatgpt",
+  geminiResponse: "gemini",
+  deepseekResponse: "deepseek",
+};
+
+function isMheTabUrl(url = "") {
+  return MHE_HOSTS.some((host) => url.includes(host));
+}
+
+function getAiModelForUrl(url = "") {
+  return (
+    Object.entries(AI_MODELS).find(([, config]) =>
+      config.hosts.some((host) => url.includes(host)),
+    )?.[0] || null
+  );
+}
+
+function resolveAiModel(preferredModel, storedModel) {
+  if (AI_MODELS[preferredModel]) return preferredModel;
+  if (AI_MODELS[storedModel]) return storedModel;
+  return "chatgpt";
 }
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
@@ -64,58 +100,32 @@ async function focusTab(tabId) {
   }
 }
 
-async function findAndStoreTabs() {
-  const mheTabs = await chrome.tabs.query({
-    url: [
-      "https://learning.mheducation.com/*",
-      "https://ezto.mheducation.com/*",
-    ],
-  });
+async function findAndStoreTabs(preferredModel = null) {
+  const mheTabs = await chrome.tabs.query({ url: MHE_URL_PATTERNS });
   if (mheTabs.length > 0) {
-    mheTabId = mheTabs[0].id;
-    mheWindowId = mheTabs[0].windowId;
+    const preferredMheTab =
+      mheTabs.find((tab) => tab.id === mheTabId) || mheTabs[0];
+    mheTabId = preferredMheTab.id;
+    mheWindowId = preferredMheTab.windowId;
   }
 
   const data = await chrome.storage.sync.get("aiModel");
-  const aiModel = data.aiModel || "chatgpt";
+  const aiModel = resolveAiModel(preferredModel, data.aiModel);
   aiType = aiModel;
 
-  if (aiModel === "chatgpt") {
-    const tabs = await chrome.tabs.query({ url: "https://chatgpt.com/*" });
-    if (tabs.length > 0) {
-      aiTabId = tabs[0].id;
-      aiWindowId = tabs[0].windowId;
-    } else {
-      aiTabId = null;
-    }
-  } else if (aiModel === "gemini") {
-    const tabs = await chrome.tabs.query({
-      url: "https://gemini.google.com/*",
-    });
-    if (tabs.length > 0) {
-      aiTabId = tabs[0].id;
-      aiWindowId = tabs[0].windowId;
-    } else {
-      aiTabId = null;
-    }
-  } else if (aiModel === "deepseek") {
-    const tabs = await chrome.tabs.query({
-      url: DEEPSEEK_URL_PATTERNS,
-    });
-    if (tabs.length > 0) {
-      const preferredTab =
-        tabs.find((tab) => tab.url && tab.url.includes("chat.deepseek.com")) ||
-        tabs[0];
-      aiTabId = preferredTab.id;
-      aiWindowId = preferredTab.windowId;
-    } else {
-      aiTabId = null;
-    }
+  const aiModelConfig = AI_MODELS[aiModel];
+  const aiTabs = await chrome.tabs.query(aiModelConfig.tabQuery);
+  if (aiTabs.length > 0) {
+    aiTabId = aiTabs[0].id;
+    aiWindowId = aiTabs[0].windowId;
+  } else {
+    aiTabId = null;
+    aiWindowId = null;
   }
 }
 
-async function shouldFocusTabs() {
-  await findAndStoreTabs();
+async function shouldFocusTabs(preferredModel = null) {
+  await findAndStoreTabs(preferredModel);
   return mheWindowId === aiWindowId;
 }
 
@@ -124,7 +134,7 @@ async function processQuestion(message) {
   processingQuestion = true;
 
   try {
-    await findAndStoreTabs();
+    await findAndStoreTabs(message.aiModel);
 
     if (!aiTabId) {
       await sendMessageWithRetry(mheTabId, {
@@ -142,7 +152,7 @@ async function processQuestion(message) {
       mheTabId = message.sourceTabId;
     }
 
-    const sameWindow = await shouldFocusTabs();
+    const sameWindow = await shouldFocusTabs(message.aiModel);
 
     if (sameWindow) {
       await focusTab(aiTabId);
@@ -198,12 +208,7 @@ async function processResponse(message) {
     }
 
     if (!mheTabId) {
-      const mheTabs = await chrome.tabs.query({
-        url: [
-          "https://learning.mheducation.com/*",
-          "https://ezto.mheducation.com/*",
-        ],
-      });
+      const mheTabs = await chrome.tabs.query({ url: MHE_URL_PATTERNS });
       if (mheTabs.length > 0) {
         mheTabId = mheTabs[0].id;
         mheWindowId = mheTabs[0].windowId;
@@ -212,7 +217,9 @@ async function processResponse(message) {
       }
     }
 
-    const sameWindow = await shouldFocusTabs();
+    const responseModel =
+      AI_RESPONSE_MODEL_BY_MESSAGE_TYPE[message.type] || null;
+    const sameWindow = await shouldFocusTabs(responseModel);
 
     if (sameWindow) {
       await focusTab(mheTabId);
@@ -226,6 +233,39 @@ async function processResponse(message) {
   } catch (error) {
     console.error("Error processing AI response:", error);
   }
+}
+
+async function processAiResponseTimeout(message) {
+  try {
+    if (!mheTabId) {
+      await findAndStoreTabs(message.aiModel);
+    }
+
+    if (!mheTabId) return;
+
+    await sendMessageWithRetry(mheTabId, {
+      type: "stopAutomation",
+      reason:
+        message.reason ||
+        "AI did not produce a response before the automation timeout.",
+    });
+  } catch (error) {}
+}
+
+async function cancelAiResponseTimeout(message) {
+  try {
+    if (!aiTabId) {
+      await findAndStoreTabs(message?.aiModel);
+    }
+    if (!aiTabId) return;
+
+    await sendMessageWithRetry(
+      aiTabId,
+      { type: "cancelResponseObservation" },
+      1,
+      300,
+    );
+  } catch (error) {}
 }
 
 async function waitForTabReady(tabId, maxAttempts = 8) {
@@ -252,26 +292,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.tab) {
     message.sourceTabId = sender.tab.id;
 
-    if (
-      sender.tab.url.includes("learning.mheducation.com") ||
-      sender.tab.url.includes("ezto.mheducation.com")
-    ) {
+    const senderUrl = sender.tab.url || "";
+    const senderAiModel = getAiModelForUrl(senderUrl);
+
+    if (isMheTabUrl(senderUrl)) {
       if (!originalTabId && !duplicateTabId) {
         mheTabId = sender.tab.id;
         mheWindowId = sender.tab.windowId;
       }
-    } else if (sender.tab.url.includes("chatgpt.com")) {
+    } else if (senderAiModel) {
       aiTabId = sender.tab.id;
       aiWindowId = sender.tab.windowId;
-      aiType = "chatgpt";
-    } else if (sender.tab.url.includes("gemini.google.com")) {
-      aiTabId = sender.tab.id;
-      aiWindowId = sender.tab.windowId;
-      aiType = "gemini";
-    } else if (isDeepSeekTabUrl(sender.tab.url || "")) {
-      aiTabId = sender.tab.id;
-      aiWindowId = sender.tab.windowId;
-      aiType = "deepseek";
+      aiType = senderAiModel;
     }
   }
 
@@ -292,6 +324,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     message.type === "deepseekResponse"
   ) {
     processResponse(message);
+    sendResponse({ received: true });
+    return true;
+  }
+
+  if (message.type === "aiResponseTimeout") {
+    processAiResponseTimeout(message);
+    sendResponse({ received: true });
+    return true;
+  }
+
+  if (message.type === "cancelAiResponseTimeout") {
+    cancelAiResponseTimeout(message);
     sendResponse({ received: true });
     return true;
   }
