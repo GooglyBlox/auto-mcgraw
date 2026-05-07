@@ -32,7 +32,7 @@
 
 ## Usage
 
-1. Log into your McGraw Hill account and open a Smartbook assignment
+1. Log into your McGraw Hill account and open a Smartbook or Connect assignment
 2. Log into one of the supported AI assistants in another tab:
    - [ChatGPT](https://chatgpt.com)
    - [Gemini](https://gemini.google.com)

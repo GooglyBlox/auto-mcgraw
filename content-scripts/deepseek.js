@@ -114,6 +114,12 @@ function updateChatInputValue(chatInput, text) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "cancelResponseObservation") {
+    resetObservation();
+    sendResponse({ received: true });
+    return true;
+  }
+
   if (message.type === "receiveQuestion") {
     resetObservation();
 
@@ -150,43 +156,7 @@ function resetObservation() {
 }
 
 async function insertQuestion(questionData) {
-  const { type, question, options, previousCorrection } = questionData;
-  let text = `Type: ${type}\nQuestion: ${question}`;
-
-  if (
-    previousCorrection &&
-    previousCorrection.question &&
-    previousCorrection.correctAnswer
-  ) {
-    text =
-      `CORRECTION FROM PREVIOUS ANSWER: For the question "${
-        previousCorrection.question
-      }", your answer was incorrect. The correct answer was: ${JSON.stringify(
-        previousCorrection.correctAnswer
-      )}\n\nNow answer this new question:\n\n` + text;
-  }
-
-  if (type === "matching") {
-    text +=
-      "\nPrompts:\n" +
-      options.prompts.map((prompt, i) => `${i + 1}. ${prompt}`).join("\n");
-    text +=
-      "\nChoices:\n" +
-      options.choices.map((choice, i) => `${i + 1}. ${choice}`).join("\n");
-    text +=
-      '\n\nPlease match each prompt with the correct choice. Set "answer" to an array of strings using the exact format \'Prompt -> Choice\'. Include one entry per prompt, use exact prompt and choice text, and use each choice at most once.';
-  } else if (type === "fill_in_the_blank") {
-    text +=
-      "\n\nThis is a fill in the blank question. If there are multiple blanks, provide answers as an array in order of appearance. For a single blank, you can provide a string.";
-  } else if (options && options.length > 0) {
-    text +=
-      "\nOptions:\n" + options.map((opt, i) => `${i + 1}. ${opt}`).join("\n");
-    text +=
-      "\n\nIMPORTANT: Your answer must EXACTLY match one of the above options. Do not include numbers in your answer. If there are periods, include them.";
-  }
-
-  text +=
-    '\n\nPlease provide your answer in JSON format with keys "answer" and "explanation". Explanations should be no more than one sentence. DO NOT acknowledge the correction in your response, only answer the new question.';
+  const text = buildPrompt(questionData);
 
   return new Promise((resolve, reject) => {
     const chatInput = findChatInput();
@@ -216,15 +186,12 @@ async function insertQuestion(questionData) {
 }
 
 function processResponse(responseText) {
-  const cleanedText = responseText
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
-    .replace(/\n\s*/g, " ")
-    .trim();
+  const cleanedText = sanitizeResponseText(responseText);
 
   try {
     const parsed = JSON.parse(cleanedText);
 
-    if (parsed && parsed.answer && !hasResponded) {
+    if (parsed && (parsed.answer !== undefined || parsed.slots) && !hasResponded) {
       hasResponded = true;
       chrome.runtime
         .sendMessage({
@@ -290,7 +257,8 @@ function checkForResponse() {
             const responseText = block.textContent.trim();
             if (
               responseText.includes("{") &&
-              responseText.includes('"answer"')
+              (responseText.includes('"answer"') ||
+                responseText.includes('"slots"'))
             ) {
               if (processResponse(responseText)) return;
             }
@@ -300,26 +268,25 @@ function checkForResponse() {
     }
 
     const messageText = message.textContent.trim();
-    const jsonMatch = messageText.match(/\{[\s\S]*?"answer"[\s\S]*?\}/);
-    if (jsonMatch) {
-      const responseText = jsonMatch[0];
+    const jsonText = findJsonObject(messageText);
+    if (jsonText && /"answer"|"slots"/.test(jsonText)) {
+      const responseText = jsonText;
       if (processResponse(responseText)) return;
     }
 
     if (Date.now() - observationStartTime > 30000) {
       try {
-        const jsonPattern = /\{[\s\S]*?"answer"[\s\S]*?"explanation"[\s\S]*?\}/;
-        const jsonMatch = messageText.match(jsonPattern);
-
-        if (jsonMatch && !hasResponded) {
-          hasResponded = true;
-          chrome.runtime.sendMessage({
-            type: "deepseekResponse",
-            response: jsonMatch[0],
-          });
-          resetObservation();
-          return true;
-        }
+        const jsonText = findJsonObject(messageText);
+        if (!jsonText || hasResponded) continue;
+        const parsed = JSON.parse(jsonText);
+        if (parsed.answer === undefined && !parsed.slots) continue;
+        hasResponded = true;
+        chrome.runtime.sendMessage({
+          type: "deepseekResponse",
+          response: jsonText,
+        });
+        resetObservation();
+        return true;
       } catch (e) {}
     }
   }
@@ -329,6 +296,7 @@ function startObserving() {
   observationStartTime = Date.now();
   observationTimeout = setTimeout(() => {
     if (!hasResponded) {
+      notifyAiResponseTimeout();
       resetObservation();
     }
   }, 180000);
@@ -346,3 +314,16 @@ function startObserving() {
 
   checkIntervalId = setInterval(checkForResponse, 1000);
 }
+
+function notifyAiResponseTimeout() {
+  try {
+    chrome.runtime.sendMessage({
+      type: "aiResponseTimeout",
+      aiModel: "deepseek",
+      reason: "DeepSeek did not produce a response within 180 seconds.",
+    });
+  } catch (error) {
+    console.error("Error notifying timeout:", error);
+  }
+}
+
