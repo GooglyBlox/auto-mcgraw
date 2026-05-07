@@ -186,6 +186,7 @@ async function insertQuestion(questionData) {
   }
 
   text +=
+    '\n\nIMPORTANT: Your answer should be in a JSON code block.' +
     '\n\nPlease provide your answer in JSON format with keys "answer" and "explanation". Explanations should be no more than one sentence. DO NOT acknowledge the correction in your response, only answer the new question.';
 
   return new Promise((resolve, reject) => {
