@@ -127,9 +127,8 @@ function startObserving() {
     }
 
     if (!responseText) {
-      responseText = latestMessage.textContent.trim();
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) responseText = jsonMatch[0];
+      const extracted = findJsonObject(latestMessage.textContent);
+      if (extracted) responseText = extracted;
     }
 
     responseText = sanitizeResponseText(responseText);

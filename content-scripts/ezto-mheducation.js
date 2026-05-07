@@ -348,8 +348,8 @@ function parseJsonResponse(responseText) {
   try {
     return JSON.parse(responseText);
   } catch (error) {
-    const match = responseText.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
+    const extracted = findJsonObject(responseText);
+    if (extracted) return JSON.parse(extracted);
     throw error;
   }
 }
@@ -645,7 +645,6 @@ function toAiSlot(slot) {
 function isNavigationChrome(element) {
   if (isCheckMyWorkControl(element)) return true;
   if (isAccountingNavigationControl(element)) return true;
-  if (isStaleAccountingClone(element)) return true;
   if (element.closest(".header__automcgraw")) return true;
 
   const tag = element.tagName.toLowerCase();
@@ -1473,18 +1472,6 @@ function isAccountingNavigationControl(element) {
     /\btransaction number\b/i.test(text) ||
     /^\d+$/.test(text)
   );
-}
-
-function isStaleAccountingClone(element) {
-  if (!element?.closest) return false;
-  if (element.closest("[data-automcgraw-hidden-duplicate='true']")) return true;
-
-  const table = element.closest("table");
-  if (table?.id === "holisticTable" && !isElementVisibleEnough(table))
-    return true;
-
-  const sheet = element.closest("#holisticSheet");
-  return Boolean(sheet && !isElementVisibleEnough(sheet));
 }
 
 function getControlText(element, options = {}) {

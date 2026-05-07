@@ -2,7 +2,6 @@ let hasResponded = false;
 let messageCountAtQuestion = 0;
 let observationStartTime = 0;
 let observationTimeout = null;
-let observationInterval = null;
 let observer = null;
 let responseInFlight = false;
 let lastSentResponseText = "";
@@ -53,10 +52,6 @@ function resetObservation() {
   if (observationTimeout) {
     clearTimeout(observationTimeout);
     observationTimeout = null;
-  }
-  if (observationInterval) {
-    clearInterval(observationInterval);
-    observationInterval = null;
   }
   if (observer) {
     observer.disconnect();
@@ -158,10 +153,6 @@ function startObserving() {
       resetObservation();
     }
   }, 180000);
-
-  observationInterval = setInterval(() => {
-    tryCaptureLatestResponse();
-  }, 1000);
 
   observer = new MutationObserver(() => {
     tryCaptureLatestResponse();

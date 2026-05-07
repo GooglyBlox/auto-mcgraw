@@ -33,7 +33,10 @@
         "https://ezto.mheducation.com/*",
         "https://newconnect.mheducation.com/*"
       ],
-      "js": ["content-scripts/ezto-mheducation.js"]
+      "js": [
+        "content-scripts/shared/ai-prompt.js",
+        "content-scripts/ezto-mheducation.js"
+      ]
     },
     {
       "matches": ["https://chatgpt.com/*"],
