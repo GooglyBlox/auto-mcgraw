@@ -295,6 +295,9 @@ async function handleAiResponse(responseText) {
   if (!isAutomating) {
     return;
   }
+  if (processingAiResponse) {
+    return;
+  }
 
   awaitingAiResponse = false;
   processingAiResponse = true;
@@ -908,7 +911,6 @@ function markActiveTabAnswered() {
   if (tab) {
     const key = normalizeComparable(tab);
     answeredTabsForCurrentQuestion.add(key);
-  } else {
   }
 }
 
