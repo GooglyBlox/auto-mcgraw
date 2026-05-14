@@ -16,9 +16,11 @@
 
 ---
 
-## Compatibility Notice
+## Public Service Announcement
 
-**⚠️ MacOS Users:** This extension may not work properly on MacOS due to platform-specific differences in Chrome extension behavior and system interactions. For the best experience, we recommend using this extension on Windows or Linux systems.
+**⚠️ This GitHub repository is the only official place to download Auto-McGraw.** Any copy of this extension hosted elsewhere is an unofficial reupload that was published without my consent, and I cannot vouch for the safety or integrity of those copies.
+
+For example, the listing at [chromewebstore.google.com/detail/auto-mcgraw-smartbook/bekpomfgdchhlcmjkniohmdgabakdnpp](https://chromewebstore.google.com/detail/auto-mcgraw-smartbook/bekpomfgdchhlcmjkniohmdgabakdnpp) is an unofficial reupload to the Chrome Web Store and is not affiliated with this project. Only download releases from this repository's [releases page](https://github.com/GooglyBlox/auto-mcgraw/releases).
 
 ---
 
