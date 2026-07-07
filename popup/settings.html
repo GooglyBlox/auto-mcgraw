@@ -141,6 +141,41 @@
             </div>
           </label>
         </div>
+        <div class="feature-toggle">
+          <label class="toggle-container">
+            <input type="checkbox" id="input-delay-toggle" />
+            <span class="toggle-slider"></span>
+            <div class="toggle-label">
+              <h3>Input Delay</h3>
+              <p>
+                Randomize how long the homework page waits before filling in
+                each answer
+              </p>
+            </div>
+          </label>
+        </div>
+        <div class="delay-settings">
+          <label class="setting-field" for="input-delay-base">
+            <span>Base seconds</span>
+            <input
+              type="number"
+              id="input-delay-base"
+              min="0"
+              step="0.1"
+              value="1.5"
+            />
+          </label>
+          <label class="setting-field" for="input-delay-deviation">
+            <span>Deviation (± seconds)</span>
+            <input
+              type="number"
+              id="input-delay-deviation"
+              min="0"
+              step="0.1"
+              value="0.5"
+            />
+          </label>
+        </div>
       </div>
 
       <div class="settings-section">

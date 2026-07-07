@@ -4,6 +4,32 @@ let lastIncorrectQuestion = null;
 let lastCorrectAnswer = null;
 let buttonAdded = false;
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getInputDelayMs() {
+  if (
+    window.AutoMcGrawInputDelay &&
+    typeof window.AutoMcGrawInputDelay.getInputDelayMs === "function"
+  ) {
+    return window.AutoMcGrawInputDelay.getInputDelayMs();
+  }
+
+  return 0;
+}
+
+function getSubmitDelayMs() {
+  if (
+    window.AutoMcGrawInputDelay &&
+    typeof window.AutoMcGrawInputDelay.getSubmitDelayMs === "function"
+  ) {
+    return window.AutoMcGrawInputDelay.getSubmitDelayMs();
+  }
+
+  return 1000 + Math.floor(Math.random() * 1001);
+}
+
 function setupMessageListener() {
   if (messageListener) {
     chrome.runtime.onMessage.removeListener(messageListener);
@@ -178,11 +204,13 @@ function parseQuestion() {
   };
 }
 
-function processChatGPTResponse(responseText) {
+async function processChatGPTResponse(responseText) {
   try {
 
     const response = JSON.parse(responseText);
     const answer = response.answer;
+
+    await delay(getInputDelayMs());
 
     if (document.querySelector(".answers-wrap.multiple-choice")) {
       handleMultipleChoiceAnswer(answer);
@@ -213,7 +241,7 @@ function processChatGPTResponse(responseText) {
         } else {
           stopAutomation("Quiz completed - no next button available");
         }
-      }, 2000);
+      }, getSubmitDelayMs());
     }
   } catch (e) {
     console.error("Error processing response:", e);

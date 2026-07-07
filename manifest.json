@@ -26,23 +26,23 @@
   "content_scripts": [
     {
       "matches": ["https://learning.mheducation.com/static/awd/*"],
-      "js": ["content-scripts/mheducation.js"]
+      "js": ["content-scripts/input-delay.js", "content-scripts/mheducation.js"]
     },
     {
       "matches": ["https://ezto.mheducation.com/*"],
-      "js": ["content-scripts/ezto-mheducation.js"]
+      "js": ["content-scripts/input-delay.js", "content-scripts/ezto-mheducation.js"]
     },
     {
       "matches": ["https://chatgpt.com/*"],
-      "js": ["content-scripts/chatgpt.js"]
+      "js": ["content-scripts/input-delay.js", "content-scripts/chatgpt.js"]
     },
     {
       "matches": ["https://gemini.google.com/*"],
-      "js": ["content-scripts/gemini.js"]
+      "js": ["content-scripts/input-delay.js", "content-scripts/gemini.js"]
     },
     {
       "matches": ["https://chat.deepseek.com/*"],
-      "js": ["content-scripts/deepseek.js"]
+      "js": ["content-scripts/input-delay.js", "content-scripts/deepseek.js"]
     }
   ],
   "web_accessible_resources": [

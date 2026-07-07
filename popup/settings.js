@@ -71,12 +71,67 @@ document.addEventListener("DOMContentLoaded", function () {
   const doubleCreditToggle = document.getElementById("double-credit-toggle");
   const randomConfidenceToggle = document.getElementById("random-confidence-toggle");
   const pauseBeforeSubmitToggle = document.getElementById("pause-before-submit-toggle");
+  const inputDelayToggle = document.getElementById("input-delay-toggle");
+  const inputDelayBaseInput = document.getElementById("input-delay-base");
+  const inputDelayDeviationInput = document.getElementById("input-delay-deviation");
 
-  chrome.storage.sync.get(["doubleCreditMode", "randomConfidence", "pauseBeforeSubmit"], function (data) {
-    doubleCreditToggle.checked = data.doubleCreditMode || false;
-    randomConfidenceToggle.checked = data.randomConfidence || false;
-    pauseBeforeSubmitToggle.checked = data.pauseBeforeSubmit || false;
+  chrome.storage.sync.get(
+    [
+      "doubleCreditMode",
+      "randomConfidence",
+      "pauseBeforeSubmit",
+      "inputDelayEnabled",
+      "inputDelayBaseSeconds",
+      "inputDelayDeviationSeconds",
+    ],
+    function (data) {
+      doubleCreditToggle.checked = data.doubleCreditMode || false;
+      randomConfidenceToggle.checked = data.randomConfidence || false;
+      pauseBeforeSubmitToggle.checked = data.pauseBeforeSubmit || false;
+      inputDelayToggle.checked = data.inputDelayEnabled || false;
+      inputDelayBaseInput.value = normalizeSeconds(data.inputDelayBaseSeconds, 1.5);
+      inputDelayDeviationInput.value = normalizeSeconds(
+        data.inputDelayDeviationSeconds,
+        0.5
+      );
+      setInputDelayControlsEnabled(inputDelayToggle.checked);
+    }
+  );
+
+  function normalizeSeconds(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return fallback;
+    }
+
+    return parsed;
+  }
+
+  function setInputDelayControlsEnabled(enabled) {
+    inputDelayBaseInput.disabled = !enabled;
+    inputDelayDeviationInput.disabled = !enabled;
+    inputDelayBaseInput.parentElement.classList.toggle("disabled", !enabled);
+    inputDelayDeviationInput.parentElement.classList.toggle("disabled", !enabled);
+  }
+
+  function saveInputDelaySettings() {
+    chrome.storage.sync.set({
+      inputDelayEnabled: inputDelayToggle.checked,
+      inputDelayBaseSeconds: normalizeSeconds(inputDelayBaseInput.value, 1.5),
+      inputDelayDeviationSeconds: normalizeSeconds(
+        inputDelayDeviationInput.value,
+        0.5
+      ),
+    });
+  }
+
+  inputDelayToggle.addEventListener("change", function () {
+    setInputDelayControlsEnabled(this.checked);
+    saveInputDelaySettings();
   });
+
+  inputDelayBaseInput.addEventListener("change", saveInputDelaySettings);
+  inputDelayDeviationInput.addEventListener("change", saveInputDelaySettings);
 
   doubleCreditToggle.addEventListener("change", function () {
     chrome.storage.sync.set({ doubleCreditMode: this.checked });

@@ -10,6 +10,28 @@ let currentResponse = null;
 let matchingPauseIntervalId = null;
 const LOG_PREFIX = "[Auto-McGraw][mhe]";
 
+function getInputDelayMs() {
+  if (
+    window.AutoMcGrawInputDelay &&
+    typeof window.AutoMcGrawInputDelay.getInputDelayMs === "function"
+  ) {
+    return window.AutoMcGrawInputDelay.getInputDelayMs();
+  }
+
+  return 0;
+}
+
+function getSubmitDelayMs() {
+  if (
+    window.AutoMcGrawInputDelay &&
+    typeof window.AutoMcGrawInputDelay.getSubmitDelayMs === "function"
+  ) {
+    return window.AutoMcGrawInputDelay.getSubmitDelayMs();
+  }
+
+  return 1000 + Math.floor(Math.random() * 1001);
+}
+
 chrome.storage.sync.get(["doubleCreditMode", "randomConfidence", "pauseBeforeSubmit"], function (data) {
   doubleCreditMode = data.doubleCreditMode || false;
   randomConfidence = data.randomConfidence || false;
@@ -127,7 +149,7 @@ function handleProcessResponseError(error) {
   updateButtonState();
 }
 
-function processDoubleCreditResponse(responseText) {
+async function processDoubleCreditResponse(responseText) {
   try {
     if (handleTopicOverview()) return;
     if (handleForcedLearning()) return;
@@ -149,6 +171,7 @@ function processDoubleCreditResponse(responseText) {
       return;
     }
 
+    await delay(getInputDelayMs());
     fillInAnswers(answers, container);
 
     waitingForDuplicateCompletion = true;
@@ -160,42 +183,43 @@ function processDoubleCreditResponse(responseText) {
   }
 }
 
-function processDuplicateTabAnswering(responseText) {
+async function processDuplicateTabAnswering(responseText) {
   try {
-
     const response = JSON.parse(responseText);
     const answers = Array.isArray(response.answer)
       ? response.answer
       : [response.answer];
 
-
     waitForElement(".probe-container", 5000)
       .then((container) => {
-
         setTimeout(() => {
-          fillInAnswers(answers, container);
+          delay(getInputDelayMs()).then(() => {
+            fillInAnswers(answers, container);
 
-          waitForElement(
-            getConfidenceSelector(),
-            3000
-          )
-            .then((button) => {
-              button.click();
+            delay(getSubmitDelayMs()).then(() => {
+              waitForElement(
+                getConfidenceSelector(),
+                3000
+              )
+                .then((button) => {
+                  button.click();
 
-              setTimeout(() => {
-                chrome.runtime.sendMessage({ type: "finishDoubleCredit" });
+                  setTimeout(() => {
+                    chrome.runtime.sendMessage({ type: "finishDoubleCredit" });
 
-                setTimeout(() => {
-                  chrome.runtime.sendMessage({ type: "closeDuplicateTab" });
-                }, 300);
-              }, 800);
-            })
-            .catch((error) => {
-              console.error(
-                "Could not find high confidence button in duplicate tab:",
-                error
-              );
+                    setTimeout(() => {
+                      chrome.runtime.sendMessage({ type: "closeDuplicateTab" });
+                    }, 300);
+                  }, 800);
+                })
+                .catch((error) => {
+                  console.error(
+                    "Could not find high confidence button in duplicate tab:",
+                    error
+                  );
+                });
             });
+          });
         }, 500);
       })
       .catch((error) => {
@@ -209,16 +233,15 @@ function processDuplicateTabAnswering(responseText) {
   }
 }
 
-function completeDoubleCreditFlow() {
+async function completeDoubleCreditFlow() {
   waitingForDuplicateCompletion = false;
 
   const container = document.querySelector(".probe-container");
   if (!container) return;
 
-  waitForElement(
-    getConfidenceSelector(),
-    3000
-  ).then((button) => {
+  await delay(getSubmitDelayMs());
+
+  waitForElement(getConfidenceSelector(), 3000).then((button) => {
     button.click();
 
     setTimeout(() => {
@@ -1576,6 +1599,8 @@ async function processChatGPTResponse(responseText) {
   lastIncorrectQuestion = null;
   lastCorrectAnswer = null;
 
+  await delay(getInputDelayMs());
+
   if (questionType === "matching") {
     const applied = await applyMatchingAnswer(container, response.answer);
     if (!applied) {
@@ -1629,6 +1654,7 @@ async function processChatGPTResponse(responseText) {
         })
         .catch(() => {});
     } else {
+      await delay(getSubmitDelayMs());
       waitForElement(
         getConfidenceSelector(),
         10000

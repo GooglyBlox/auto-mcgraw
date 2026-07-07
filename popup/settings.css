@@ -221,6 +221,47 @@ h2 {
   line-height: 1.4;
 }
 
+.delay-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.setting-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.setting-field span {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.setting-field input[type="number"] {
+  width: 100%;
+  background: #0f0f0f;
+  color: var(--text);
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.setting-field input[type="number"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.setting-field.disabled {
+  opacity: 0.65;
+}
+
 /* Version */
 
 .version-info {

@@ -56,6 +56,7 @@ Click the settings icon ( <img src="assets/settings-icon.svg" alt="Settings Icon
 - Choose between **ChatGPT**, **Gemini**, or **DeepSeek** for answering questions
 - See the status of your AI assistant connections
 - Check if your selected AI assistant is ready to use
+- Enable a randomized input delay with a base time and deviation for more natural answer pacing
 
 The extension will automatically use your selected AI model for all future automation sessions.
 
