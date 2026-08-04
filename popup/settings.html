@@ -16,88 +16,64 @@
       <div class="settings-section">
         <h2>AI Assistant</h2>
         <div class="model-selector">
-          <button id="chatgpt" class="model-button active">
-            <div class="model-icon">
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M9.20509 8.76511V6.50545C9.20509 6.31513 9.27649 6.17234 9.44293 6.0773L13.9861 3.46088C14.6046 3.10413 15.342 2.93769 16.103 2.93769C18.9573 2.93769 20.7651 5.14983 20.7651 7.50454C20.7651 7.67098 20.7651 7.86129 20.7412 8.05161L16.0316 5.2924C15.7462 5.12596 15.4607 5.12596 15.1753 5.2924L9.20509 8.76511ZM19.8135 17.5659V12.1664C19.8135 11.8333 19.6708 11.5955 19.3854 11.429L13.4152 7.95633L15.3656 6.83833C15.5321 6.74328 15.6749 6.74328 15.8413 6.83833L20.3845 9.45474C21.6928 10.216 22.5728 11.8333 22.5728 13.4031C22.5728 15.2108 21.5025 16.8758 19.8135 17.5657V17.5659ZM7.80173 12.8088L5.8513 11.6671C5.68486 11.5721 5.61346 11.4293 5.61346 11.239V6.00613C5.61346 3.46111 7.56389 1.53433 10.2042 1.53433C11.2033 1.53433 12.1307 1.86743 12.9159 2.46202L8.2301 5.17371C7.94475 5.34015 7.80195 5.57798 7.80195 5.91109V12.809L7.80173 12.8088ZM12 15.2349L9.20509 13.6651V10.3351L12 8.76534L14.7947 10.3351V13.6651L12 15.2349ZM13.7958 22.4659C12.7967 22.4659 11.8693 22.1328 11.0841 21.5382L15.7699 18.8265C16.0553 18.6601 16.198 18.4222 16.198 18.0891V11.1912L18.1723 12.3329C18.3388 12.4279 18.4102 12.5707 18.4102 12.761V17.9939C18.4102 20.5389 16.4359 22.4657 13.7958 22.4657V22.4659ZM8.15848 17.1617L3.61528 14.5452C2.30696 13.784 1.42701 12.1667 1.42701 10.5969C1.42701 8.76534 2.52115 7.12414 4.20987 6.43428V11.8574C4.20987 12.1905 4.35266 12.4284 4.63802 12.5948L10.5846 16.0436L8.63415 17.1617C8.46771 17.2567 8.32492 17.2567 8.15848 17.1617ZM7.897 21.0625C5.20919 21.0625 3.23488 19.0407 3.23488 16.5432C3.23488 16.3529 3.25875 16.1626 3.2824 15.9723L7.96817 18.6839C8.25352 18.8504 8.53911 18.8504 8.82446 18.6839L14.7947 15.2351V17.4948C14.7947 17.6851 14.7233 17.8279 14.5568 17.9229L10.0136 20.5393C9.39518 20.8961 8.6578 21.0625 7.89677 21.0625H7.897ZM13.7958 23.8929C16.6739 23.8929 19.0762 21.8474 19.6235 19.1357C22.2874 18.4459 24 15.9484 24 13.4034C24 11.7383 23.2865 10.121 22.002 8.95542C22.121 8.45588 22.1924 7.95633 22.1924 7.45702C22.1924 4.0557 19.4331 1.51045 16.2458 1.51045C15.6037 1.51045 14.9852 1.60549 14.3668 1.81968C13.2963 0.773071 11.8215 0.107086 10.2042 0.107086C7.32606 0.107086 4.92383 2.15256 4.37653 4.86425C1.7126 5.55411 0 8.05161 0 10.5966C0 12.2617 0.713506 13.879 1.99795 15.0446C1.87904 15.5441 1.80764 16.0436 1.80764 16.543C1.80764 19.9443 4.56685 22.4895 7.75421 22.4895C8.39632 22.4895 9.01478 22.3945 9.63324 22.1803C10.7035 23.2269 12.1783 23.8929 13.7958 23.8929Z"
-                  fill="#10A37F"
-                />
-              </svg>
-            </div>
-            <div class="model-details">
-              <h3>ChatGPT</h3>
-              <p>OpenAI's ChatGPT model</p>
-            </div>
+          <button id="chatgpt" class="model-button">
+            <div class="model-icon model-icon-chatgpt"><img src="../assets/chatgpt.svg" alt="ChatGPT" /></div>
+            <div class="model-details"><h3>ChatGPT</h3><p>Uses a ChatGPT tab</p></div>
           </button>
-
           <button id="gemini" class="model-button">
-            <div class="model-icon">
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 16 16"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M16 8.016A8.522 8.522 0 008.016 16h-.032A8.521 8.521 0 000 8.016v-.032A8.521 8.521 0 007.984 0h.032A8.522 8.522 0 0016 7.984v.032z"
-                  fill="url(#prefix__paint0_radial_980_20147)"
-                />
-                <defs>
-                  <radialGradient
-                    id="prefix__paint0_radial_980_20147"
-                    cx="0"
-                    cy="0"
-                    r="1"
-                    gradientUnits="userSpaceOnUse"
-                    gradientTransform="matrix(16.1326 5.4553 -43.70045 129.2322 1.588 6.503)"
-                  >
-                    <stop offset=".067" stop-color="#9168C0" />
-                    <stop offset=".343" stop-color="#5684D1" />
-                    <stop offset=".672" stop-color="#1BA1E3" />
-                  </radialGradient>
-                </defs>
-              </svg>
-            </div>
-            <div class="model-details">
-              <h3>Gemini</h3>
-              <p>Google's Gemini model</p>
-            </div>
+            <div class="model-icon model-icon-gemini"><img src="../assets/gemini.svg" alt="Gemini" /></div>
+            <div class="model-details"><h3>Gemini</h3><p>Uses a Gemini tab</p></div>
           </button>
-
           <button id="deepseek" class="model-button">
-            <div class="model-icon">
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 30 30"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  id="path"
-                  d="M27.501 8.46875C27.249 8.3457 27.1406 8.58008 26.9932 8.69922C26.9434 8.73828 26.9004 8.78906 26.8584 8.83398C26.4902 9.22852 26.0605 9.48633 25.5 9.45508C24.6787 9.41016 23.9785 9.66797 23.3594 10.2969C23.2275 9.52148 22.79 9.05859 22.125 8.76172C21.7764 8.60742 21.4238 8.45312 21.1807 8.11719C21.0098 7.87891 20.9639 7.61328 20.8779 7.35156C20.8242 7.19336 20.7695 7.03125 20.5879 7.00391C20.3906 6.97266 20.3135 7.13867 20.2363 7.27734C19.9258 7.84375 19.8066 8.46875 19.8174 9.10156C19.8447 10.5234 20.4453 11.6562 21.6367 12.4629C21.7725 12.5547 21.8076 12.6484 21.7646 12.7832C21.6836 13.0605 21.5869 13.3301 21.501 13.6074C21.4473 13.7852 21.3662 13.8242 21.1768 13.7461C20.5225 13.4727 19.957 13.0684 19.458 12.5781C18.6104 11.7578 17.8438 10.8516 16.8877 10.1426C16.6631 9.97656 16.4395 9.82227 16.207 9.67578C15.2314 8.72656 16.335 7.94727 16.5898 7.85547C16.8574 7.75977 16.6826 7.42773 15.8193 7.43164C14.957 7.43555 14.167 7.72461 13.1611 8.10938C13.0137 8.16797 12.8594 8.21094 12.7002 8.24414C11.7871 8.07227 10.8389 8.0332 9.84766 8.14453C7.98242 8.35352 6.49219 9.23633 5.39648 10.7441C4.08105 12.5547 3.77148 14.6133 4.15039 16.7617C4.54883 19.0234 5.70215 20.8984 7.47559 22.3633C9.31348 23.8809 11.4307 24.625 13.8457 24.4824C15.3125 24.3984 16.9463 24.2012 18.7881 22.6406C19.2529 22.8711 19.7402 22.9629 20.5498 23.0332C21.1729 23.0918 21.7725 23.002 22.2373 22.9062C22.9648 22.752 22.9141 22.0781 22.6514 21.9531C20.5186 20.959 20.9863 21.3633 20.5605 21.0371C21.6445 19.752 23.2783 18.418 23.917 14.0977C23.9668 13.7539 23.9238 13.5391 23.917 13.2598C23.9131 13.0918 23.9512 13.0254 24.1445 13.0059C24.6787 12.9453 25.1973 12.7988 25.6738 12.5352C27.0557 11.7793 27.6123 10.5391 27.7441 9.05078C27.7637 8.82422 27.7402 8.58789 27.501 8.46875ZM15.46 21.8613C13.3926 20.2344 12.3906 19.6992 11.9766 19.7227C11.5898 19.7441 11.6592 20.1875 11.7441 20.4766C11.833 20.7617 11.9492 20.959 12.1123 21.209C12.2246 21.375 12.3018 21.623 12 21.8066C11.334 22.2207 10.1768 21.668 10.1221 21.6406C8.77539 20.8477 7.64941 19.7988 6.85547 18.3652C6.08984 16.9844 5.64453 15.5039 5.57129 13.9238C5.55176 13.541 5.66406 13.4062 6.04297 13.3379C6.54199 13.2461 7.05762 13.2266 7.55664 13.2988C9.66602 13.6074 11.4619 14.5527 12.9668 16.0469C13.8262 16.9004 14.4766 17.918 15.1465 18.9121C15.8584 19.9688 16.625 20.9746 17.6006 21.7988C17.9443 22.0879 18.2197 22.3086 18.4824 22.4707C17.6895 22.5586 16.3652 22.5781 15.46 21.8613ZM16.4502 15.4805C16.4502 15.3105 16.5859 15.1758 16.7568 15.1758C16.7949 15.1758 16.8301 15.1836 16.8613 15.1953C16.9033 15.2109 16.9424 15.2344 16.9727 15.2695C17.0273 15.3223 17.0586 15.4004 17.0586 15.4805C17.0586 15.6504 16.9229 15.7852 16.7529 15.7852C16.582 15.7852 16.4502 15.6504 16.4502 15.4805ZM19.5273 17.0625C19.3301 17.1426 19.1328 17.2129 18.9434 17.2207C18.6494 17.2344 18.3281 17.1152 18.1533 16.9688C17.8828 16.7422 17.6895 16.6152 17.6074 16.2168C17.5732 16.0469 17.5928 15.7852 17.623 15.6348C17.6934 15.3105 17.6152 15.1035 17.3877 14.9141C17.2012 14.7598 16.9658 14.7188 16.7061 14.7188C16.6094 14.7188 16.5205 14.6758 16.4541 14.6406C16.3457 14.5859 16.2568 14.4512 16.3418 14.2852C16.3691 14.2324 16.501 14.1016 16.5322 14.0781C16.8838 13.877 17.29 13.9434 17.666 14.0938C18.0146 14.2363 18.2773 14.498 18.6562 14.8672C19.0439 15.3145 19.1133 15.4395 19.334 15.7734C19.5078 16.0371 19.667 16.3066 19.7754 16.6152C19.8408 16.8066 19.7559 16.9648 19.5273 17.0625Z"
-                  fill="#4D6BFE"
-                />
-              </svg>
-            </div>
-            <div class="model-details">
-              <h3>DeepSeek</h3>
-              <p>DeepSeek's AI model</p>
-            </div>
+            <div class="model-icon model-icon-deepseek"><img src="../assets/deepseek.svg" alt="DeepSeek" /></div>
+            <div class="model-details"><h3>DeepSeek</h3><p>Uses a DeepSeek tab</p></div>
+          </button>
+          <button id="openrouter" class="model-button">
+            <div class="model-icon model-icon-openrouter"><img src="../assets/openrouter.svg" alt="OpenRouter" /></div>
+            <div class="model-details"><h3>OpenRouter / API</h3><p>Direct API calls; no assistant tab required</p></div>
           </button>
         </div>
 
-        <div class="status-section">
-          <div id="status-message">Checking assistant availability...</div>
+        <div id="openrouter-config" class="openrouter-config">
+          <div class="form-field">
+            <label for="api-base-url">API base URL</label>
+            <input id="api-base-url" type="url" autocomplete="off" placeholder="https://openrouter.ai/api/v1" />
+            <p>The extension appends <code>/chat/completions</code>. HTTPS endpoints and local HTTP endpoints are supported.</p>
+          </div>
+          <div class="form-field">
+            <label for="api-key">API key</label>
+            <input id="api-key" type="password" autocomplete="off" placeholder="sk-..." />
+            <p>Stored locally in this browser and sent to the configured API.</p>
+          </div>
+          <div class="form-field">
+            <label for="api-model">Model ID</label>
+            <input id="api-model" type="text" placeholder="openai/gpt-4o-mini" />
+          </div>
+          <div class="form-field">
+            <label for="api-provider">OpenRouter provider</label>
+            <select id="api-provider">
+              <option value="">Automatic</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="google-ai-studio">Google AI Studio</option>
+              <option value="google-vertex">Google Vertex</option>
+              <option value="together">Together</option>
+              <option value="fireworks">Fireworks</option>
+              <option value="deepinfra">DeepInfra</option>
+              <option value="groq">Groq</option>
+              <option value="azure">Azure</option>
+            </select>
+            <p>Only used when the base URL is OpenRouter. Automatic lets OpenRouter choose.</p>
+          </div>
+          <div class="form-field">
+            <label for="api-provider-custom">Custom provider slug</label>
+            <input id="api-provider-custom" type="text" placeholder="e.g. provider-slug" />
+            <p>Optional. If filled in, this overrides the dropdown selection.</p>
+          </div>
+          <button id="save-openrouter" class="save-button">Save API settings</button>
         </div>
+
+        <div class="status-section"><div id="status-message">Checking assistant availability...</div></div>
       </div>
 
       <div class="settings-section">
@@ -106,39 +82,35 @@
           <label class="toggle-container">
             <input type="checkbox" id="double-credit-toggle" />
             <span class="toggle-slider"></span>
-            <div class="toggle-label">
-              <h3>Double Credit Mode</h3>
-              <p>
-                Answer each question twice using duplicate tabs to earn double
-                points
-              </p>
-            </div>
+            <div class="toggle-label"><h3>Double Credit Mode</h3><p>Answer each question twice using duplicate tabs to earn double points</p></div>
           </label>
         </div>
         <div class="feature-toggle">
           <label class="toggle-container">
             <input type="checkbox" id="random-confidence-toggle" />
             <span class="toggle-slider"></span>
-            <div class="toggle-label">
-              <h3>Randomize Confidence</h3>
-              <p>
-                Randomly select between High, Medium, and Low confidence levels
-                instead of always choosing High
-              </p>
-            </div>
+            <div class="toggle-label"><h3>Randomize Confidence</h3><p>Randomly select between High, Medium, and Low confidence levels</p></div>
           </label>
         </div>
         <div class="feature-toggle">
           <label class="toggle-container">
             <input type="checkbox" id="pause-before-submit-toggle" />
             <span class="toggle-slider"></span>
-            <div class="toggle-label">
-              <h3>Pause Before Submit</h3>
-              <p>
-                Fill in answers but wait for you to manually select confidence
-                and advance to the next question
-              </p>
-            </div>
+            <div class="toggle-label"><h3>Pause Before Submit</h3><p>Fill in answers but wait for you to manually select confidence and advance</p></div>
+          </label>
+        </div>
+        <div class="feature-toggle">
+          <label class="toggle-container">
+            <input type="checkbox" id="include-image-alt-text-toggle" />
+            <span class="toggle-slider"></span>
+            <div class="toggle-label"><h3>Include Image Alt Text <span class="experimental-label">Experimental</span></h3><p>Send non-empty image descriptions from the question prompt with the AI request</p></div>
+          </label>
+        </div>
+        <div class="feature-toggle">
+          <label class="toggle-container">
+            <input type="checkbox" id="full-auto-toggle" />
+            <span class="toggle-slider"></span>
+            <div class="toggle-label"><h3>Full Auto Matching <span class="experimental-label">Experimental</span></h3><p>Suppress matching-question manual dialogs and keep attempting the answer automatically</p></div>
           </label>
         </div>
       </div>
@@ -146,26 +118,17 @@
       <div class="settings-section">
         <h2>Version Information</h2>
         <div class="version-info">
-          <div class="version-current">
-            <span class="version-label">Current Version:</span>
-            <span id="current-version">Loading...</span>
-          </div>
-          <div class="version-latest">
-            <span class="version-label">Latest Version:</span>
-            <span id="latest-version">Checking...</span>
-          </div>
+          <div class="version-current"><span class="version-label">Current Version:</span><span id="current-version">Loading...</span></div>
+          <div class="version-latest"><span class="version-label">Latest Version:</span><span id="latest-version">Checking...</span></div>
           <div id="version-status">Checking for updates...</div>
-          <button id="check-updates" class="update-button">
-            Check for Updates
-          </button>
+          <button id="check-updates" class="update-button">Check for Updates</button>
         </div>
       </div>
 
       <footer>
         <p>Auto-McGraw <span id="footer-version">Loading...</span> by GooglyBlox</p>
-        <a href="https://github.com/GooglyBlox/auto-mcgraw" target="_blank"
-          >GitHub
-        </a>
+        <a href="dashboard.html" id="monitoring-link">Monitoring</a>
+        <a href="https://github.com/GooglyBlox/auto-mcgraw" target="_blank">GitHub</a>
       </footer>
     </div>
     <script src="settings.js"></script>

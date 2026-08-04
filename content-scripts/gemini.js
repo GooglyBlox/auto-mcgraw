@@ -53,8 +53,12 @@ function waitForIdle(timeout = 120000) {
 }
 
 async function insertQuestion(questionData) {
-  const { type, question, options, previousCorrection } = questionData;
+  const { type, question, options, imageAltText, previousCorrection } = questionData;
   let text = `Type: ${type}\nQuestion: ${question}`;
+
+  if (Array.isArray(imageAltText) && imageAltText.length > 0) {
+    text += "\n\nImage alternative text:\n" + imageAltText.map((alt, i) => `${i + 1}. ${alt}`).join("\n");
+  }
 
   if (
     previousCorrection &&
@@ -89,7 +93,6 @@ async function insertQuestion(questionData) {
   }
 
   text +=
-    '\n\nIMPORTANT: Your answer should be in a JSON code block.' +
     '\n\nPlease provide your answer in JSON format with keys "answer" and "explanation". Explanations should be no more than one sentence. DO NOT acknowledge the correction in your response, only answer the new question.';
 
   return new Promise((resolve, reject) => {

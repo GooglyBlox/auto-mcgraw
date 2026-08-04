@@ -10,6 +10,30 @@
   --warning: #ffb74d;
 }
 
+/* Keep the popup scrollbar in the same dark/blue palette as the extension. */
+html {
+  scrollbar-color: #3d4f9e var(--bg);
+  scrollbar-width: thin;
+}
+
+html::-webkit-scrollbar {
+  width: 10px;
+}
+
+html::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+html::-webkit-scrollbar-thumb {
+  background: #3d4f9e;
+  border: 3px solid var(--bg);
+  border-radius: 999px;
+}
+
+html::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -65,6 +89,63 @@ h2 {
   margin-bottom: 24px;
 }
 
+.form-field {
+  margin-bottom: 12px;
+}
+
+.form-field label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.form-field input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.form-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.form-field select {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.form-field p {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.save-button {
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 9px 12px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  font: inherit;
+}
+
+.save-button:hover {
+  filter: brightness(1.1);
+}
+
 /* Model selector */
 
 .model-selector {
@@ -107,6 +188,36 @@ h2 {
 .model-icon svg {
   width: 22px;
   height: 22px;
+}
+
+.model-icon img {
+  width: 25px;
+  height: 25px;
+  display: block;
+  object-fit: contain;
+}
+
+.model-icon-deepseek img {
+  width: 31px;
+  height: 22px;
+}
+
+.model-icon-chatgpt,
+.model-icon-gemini,
+.model-icon-deepseek,
+.model-icon-openrouter {
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.model-icon-chatgpt { color: #10a37f; }
+.model-icon-gemini { color: #7c6cf2; }
+.model-icon-deepseek { color: #4d6bfe; }
+.model-icon-openrouter { color: #ff7a45; }
+
+.openrouter-config[hidden] {
+  display: none;
 }
 
 .model-details h3 {
@@ -219,6 +330,14 @@ h2 {
   font-size: 11px;
   color: var(--text-secondary);
   line-height: 1.4;
+}
+
+.experimental-label {
+  color: var(--warning);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 /* Version */

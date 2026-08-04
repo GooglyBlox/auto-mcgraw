@@ -3,6 +3,24 @@ let isAutomating = false;
 let lastIncorrectQuestion = null;
 let lastCorrectAnswer = null;
 let buttonAdded = false;
+let includeImageAltText = false;
+
+function getAssistantDisplayName(model) {
+  if (model === "gemini") return "Gemini";
+  if (model === "deepseek") return "DeepSeek";
+  if (model === "openrouter") return "OpenRouter";
+  return "ChatGPT";
+}
+
+chrome.storage.sync.get("includeImageAltText", (data) => {
+  includeImageAltText = Boolean(data.includeImageAltText);
+});
+
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.includeImageAltText) {
+    includeImageAltText = Boolean(changes.includeImageAltText.newValue);
+  }
+});
 
 function setupMessageListener() {
   if (messageListener) {
@@ -81,20 +99,9 @@ function checkForQuizEnd() {
 function stopAutomation(reason = "Quiz completed") {
   isAutomating = false;
 
-  chrome.storage.sync.get("aiModel", function (data) {
-    const currentModel = data.aiModel || "chatgpt";
-    let currentModelName = "ChatGPT";
-
-    if (currentModel === "gemini") {
-      currentModelName = "Gemini";
-    } else if (currentModel === "deepseek") {
-      currentModelName = "DeepSeek";
-    }
-
+  chrome.storage.sync.get("aiModel", (data) => {
     const btn = document.querySelector(".header__automcgraw--main");
-    if (btn) {
-      btn.textContent = `Ask ${currentModelName}`;
-    }
+    if (btn) btn.textContent = `Ask ${getAssistantDisplayName(data.aiModel || "chatgpt")}`;
   });
 
   alert(`Automation stopped: ${reason}`);
@@ -112,6 +119,14 @@ function checkForNextStep() {
   } else {
     stopAutomation("No question found or question type not supported");
   }
+}
+
+function extractImageAltText(root) {
+  if (!root) return [];
+  return Array.from(root.querySelectorAll("img[alt]"))
+    .map((image) => image.getAttribute("alt")?.trim() || "")
+    .filter(Boolean)
+    .filter((alt, index, values) => values.indexOf(alt) === index);
 }
 
 function parseQuestion() {
@@ -165,10 +180,15 @@ function parseQuestion() {
     questionText = questionElement.textContent.trim();
   }
 
+  const imageAltText = includeImageAltText
+    ? extractImageAltText(questionElement)
+    : [];
+
   return {
     type: questionType,
     question: questionText,
     options: options,
+    imageAltText,
     previousCorrection: lastIncorrectQuestion
       ? {
           question: lastIncorrectQuestion,
@@ -300,18 +320,8 @@ function addAssistantButton() {
     align-items: center;
   `;
 
-  chrome.storage.sync.get("aiModel", function (data) {
-    const aiModel = data.aiModel || "chatgpt";
-    let modelName = "ChatGPT";
-
-    if (aiModel === "gemini") {
-      modelName = "Gemini";
-    } else if (aiModel === "deepseek") {
-      modelName = "DeepSeek";
-    }
-
     const btn = document.createElement("button");
-    btn.textContent = `Ask ${modelName}`;
+    btn.textContent = "Ask ChatGPT";
     btn.type = "button";
     btn.className = "header__automcgraw--main";
     btn.style.cssText = `
@@ -399,23 +409,19 @@ function addAssistantButton() {
     buttonContainer.appendChild(settingsBtn);
     helpLink.parentNode.insertBefore(buttonContainer, helpLink);
 
+    chrome.storage.sync.get("aiModel", (data) => {
+      if (!isAutomating) {
+        btn.textContent = `Ask ${getAssistantDisplayName(data.aiModel || "chatgpt")}`;
+      }
+    });
+
     chrome.storage.onChanged.addListener((changes) => {
       if (changes.aiModel) {
-        const newModel = changes.aiModel.newValue;
-        let newModelName = "ChatGPT";
-
-        if (newModel === "gemini") {
-          newModelName = "Gemini";
-        } else if (newModel === "deepseek") {
-          newModelName = "DeepSeek";
-        }
-
         if (!isAutomating) {
-          btn.textContent = `Ask ${newModelName}`;
+          btn.textContent = `Ask ${getAssistantDisplayName(changes.aiModel.newValue || "chatgpt")}`;
         }
       }
     });
-  });
 }
 
 function waitForElement(selector, timeout = 5000) {

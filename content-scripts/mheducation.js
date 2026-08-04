@@ -5,15 +5,26 @@ let lastCorrectAnswer = null;
 let doubleCreditMode = false;
 let randomConfidence = false;
 let pauseBeforeSubmit = false;
+let includeImageAltText = false;
+let fullAutoMatching = false;
 let waitingForDuplicateCompletion = false;
 let currentResponse = null;
 let matchingPauseIntervalId = null;
 const LOG_PREFIX = "[Auto-McGraw][mhe]";
 
-chrome.storage.sync.get(["doubleCreditMode", "randomConfidence", "pauseBeforeSubmit"], function (data) {
+function getAssistantDisplayName(model) {
+  if (model === "gemini") return "Gemini";
+  if (model === "deepseek") return "DeepSeek";
+  if (model === "openrouter") return "OpenRouter";
+  return "ChatGPT";
+}
+
+chrome.storage.sync.get(["doubleCreditMode", "randomConfidence", "pauseBeforeSubmit", "includeImageAltText", "fullAutoMatching"], function (data) {
   doubleCreditMode = data.doubleCreditMode || false;
   randomConfidence = data.randomConfidence || false;
   pauseBeforeSubmit = data.pauseBeforeSubmit || false;
+  includeImageAltText = data.includeImageAltText || false;
+  fullAutoMatching = data.fullAutoMatching || false;
 });
 
 chrome.storage.onChanged.addListener((changes) => {
@@ -25,6 +36,12 @@ chrome.storage.onChanged.addListener((changes) => {
   }
   if (changes.pauseBeforeSubmit) {
     pauseBeforeSubmit = changes.pauseBeforeSubmit.newValue;
+  }
+  if (changes.includeImageAltText) {
+    includeImageAltText = changes.includeImageAltText.newValue;
+  }
+  if (changes.fullAutoMatching) {
+    fullAutoMatching = changes.fullAutoMatching.newValue;
   }
 });
 
@@ -102,19 +119,12 @@ function setupMessageListener() {
 
 function updateButtonState() {
   chrome.storage.sync.get(["aiModel", "doubleCreditMode"], function (data) {
-    const currentModel = data.aiModel || "chatgpt";
     const doubleMode = data.doubleCreditMode || false;
-    let currentModelName = "ChatGPT";
-
-    if (currentModel === "gemini") {
-      currentModelName = "Gemini";
-    } else if (currentModel === "deepseek") {
-      currentModelName = "DeepSeek";
-    }
+    const modelName = getAssistantDisplayName(data.aiModel || "chatgpt");
 
     const btn = document.querySelector(".automcgraw-btn");
     if (btn) {
-      btn.textContent = `Ask ${currentModelName}${doubleMode ? " (2x)" : ""}`;
+      btn.textContent = `Ask ${modelName}${doubleMode ? " (2x)" : ""}`;
     }
   });
 }
@@ -293,9 +303,20 @@ function fillInAnswers(answers, container) {
 }
 
 function checkForCorrectAnswer(container) {
+  const correctnessMarker = container.querySelector(".awd-probe-correctness");
   const incorrectMarker = container.querySelector(
     ".awd-probe-correctness.incorrect"
   );
+
+  if (!correctnessMarker) {
+    return;
+  }
+
+  chrome.runtime.sendMessage({
+    type: "reportQuestionResult",
+    incorrect: Boolean(incorrectMarker),
+  });
+
   if (incorrectMarker) {
     const correctionData = extractCorrectAnswer();
     if (correctionData && correctionData.answer) {
@@ -1508,6 +1529,43 @@ async function applyMatchingAnswer(container, rawAnswer) {
 
   return isMatchingAligned(container, targetsByRow);
 }
+
+async function bruteForceMatchingAnswer(container, rawAnswer) {
+  const targetsByRow = normalizeMatchingTargets(container, rawAnswer);
+  const targets = targetsByRow.filter(
+    (target) => target.choiceText
+  );
+  if (!targets.length) return false;
+
+  const strategies = [
+    { key: " ", code: "Space", keyCode: 32 },
+    { key: "Enter", code: "Enter", keyCode: 13 },
+  ];
+
+  for (let pass = 0; pass < 8; pass += 1) {
+    for (const target of targets) {
+      const currentLocation = getMatchingChoiceLocation(
+        container,
+        target.choiceText
+      );
+      if (currentLocation?.rowIndex === target.rowIndex) continue;
+
+      for (const strategy of strategies) {
+        const moved = await moveMatchingChoiceToRow(
+          container,
+          target.choiceText,
+          target.rowIndex,
+          strategy
+        );
+        if (moved) break;
+      }
+    }
+
+    if (isMatchingAligned(container, targetsByRow)) return true;
+  }
+
+  return isMatchingAligned(container, targetsByRow);
+}
 function extractChoicesFromCombinedAnswer(answerText, questionChoices) {
   if (typeof answerText !== "string" || questionChoices.length === 0) {
     return [];
@@ -1577,20 +1635,34 @@ async function processChatGPTResponse(responseText) {
   lastCorrectAnswer = null;
 
   if (questionType === "matching") {
-    const applied = await applyMatchingAnswer(container, response.answer);
-    if (!applied) {
-      const questionSignature = getQuestionSignature(container);
-      alert(
-        "Matching Question Solution:\n\n" +
-          (answers.length ? answers.join("\n") : "No confident matches parsed.") +
-          "\n\nPlease input these matches manually, then click high confidence and next. Automation will resume after you move to the next question."
+    let applied = await applyMatchingAnswer(container, response.answer);
+    if (!applied && fullAutoMatching) {
+      console.warn(
+        LOG_PREFIX,
+        "Normal matching placement did not finish; using experimental full-auto retries."
       );
+      applied = await bruteForceMatchingAnswer(container, response.answer);
+    }
+    if (!applied) {
+      if (!fullAutoMatching) {
+        const questionSignature = getQuestionSignature(container);
+        alert(
+          "Matching Question Solution:\n\n" +
+            (answers.length ? answers.join("\n") : "No confident matches parsed.") +
+            "\n\nPlease input these matches manually, then click high confidence and next. Automation will resume after you move to the next question."
+        );
 
-      if (isAutomating) {
-        pauseForManualMatchingAndResume(questionSignature);
+        if (isAutomating) {
+          pauseForManualMatchingAndResume(questionSignature);
+        }
+        return;
       }
 
-      return;
+      console.warn(
+        LOG_PREFIX,
+        "Experimental full-auto matching could not verify alignment; continuing without showing the manual solution dialog.",
+        getMatchingSnapshot(container)
+      );
     }
   } else if (questionType === "select_text") {
     const choices = container.querySelectorAll(
@@ -1671,15 +1743,8 @@ function addAssistantButton() {
     buttonContainer.style.marginLeft = "10px";
 
     chrome.storage.sync.get(["aiModel", "doubleCreditMode"], function (data) {
-      const aiModel = data.aiModel || "chatgpt";
       doubleCreditMode = data.doubleCreditMode || false;
-      let modelName = "ChatGPT";
-
-      if (aiModel === "gemini") {
-        modelName = "Gemini";
-      } else if (aiModel === "deepseek") {
-        modelName = "DeepSeek";
-      }
+      const modelName = getAssistantDisplayName(data.aiModel || "chatgpt");
 
       const btn = document.createElement("button");
       btn.textContent = `Ask ${modelName}${doubleCreditMode ? " (2x)" : ""}`;
@@ -1735,18 +1800,11 @@ function addAssistantButton() {
           chrome.storage.sync.get(
             ["aiModel", "doubleCreditMode"],
             function (data) {
-              const newModel = data.aiModel || "chatgpt";
               const doubleMode = data.doubleCreditMode || false;
               doubleCreditMode = doubleMode;
-              let newModelName = "ChatGPT";
+              const modelName = getAssistantDisplayName(data.aiModel || "chatgpt");
 
-              if (newModel === "gemini") {
-                newModelName = "Gemini";
-              } else if (newModel === "deepseek") {
-                newModelName = "DeepSeek";
-              }
-
-              btn.textContent = `Ask ${newModelName}${
+              btn.textContent = `Ask ${modelName}${
                 doubleMode ? " (2x)" : ""
               }`;
             }
@@ -1755,6 +1813,14 @@ function addAssistantButton() {
       });
     });
   });
+}
+
+function extractImageAltText(root) {
+  if (!root) return [];
+  return Array.from(root.querySelectorAll("img[alt]"))
+    .map((image) => image.getAttribute("alt")?.trim() || "")
+    .filter(Boolean)
+    .filter((alt, index, values) => values.indexOf(alt) === index);
 }
 
 function parseQuestion() {
@@ -1790,6 +1856,10 @@ function parseQuestion() {
     questionText = promptEl ? promptEl.textContent.trim() : "";
   }
 
+  const imageAltText = includeImageAltText
+    ? extractImageAltText(promptEl || container)
+    : [];
+
   let options = [];
   if (questionType === "matching") {
     const prompts = getMatchingRows(container)
@@ -1817,6 +1887,7 @@ function parseQuestion() {
     type: questionType,
     question: questionText,
     options: options,
+    imageAltText,
     previousCorrection: lastIncorrectQuestion
       ? {
           question: lastIncorrectQuestion,
