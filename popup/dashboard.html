@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Auto-McGraw Monitoring</title>
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <main class="dashboard">
+      <header class="dashboard-header">
+        <div>
+          <p class="eyebrow">Auto-McGraw</p>
+          <h1>Monitoring</h1>
+          <p class="subtext">Live status for the tabs using the extension.</p>
+        </div>
+        <button id="clear-monitoring" class="secondary-button">Clear history</button>
+      </header>
+
+      <section class="summary" aria-label="Summary">
+        <div class="summary-card"><span>Active</span><strong id="active-count">0</strong></div>
+        <div class="summary-card"><span>Completed</span><strong id="completed-count">0</strong></div>
+        <div class="summary-card"><span>Errors</span><strong id="error-count">0</strong></div>
+        <div class="summary-card"><span>Correct</span><strong id="correct-count">0</strong></div>
+        <div class="summary-card"><span>Wrong</span><strong id="wrong-count">0</strong></div>
+      </section>
+
+      <section class="activity-panel">
+        <div class="panel-heading"><h2>Activity</h2><span id="last-updated">Waiting for activity</span></div>
+        <div id="activity-list" class="activity-list"></div>
+      </section>
+    </main>
+    <script src="dashboard.js"></script>
+  </body>
+</html>

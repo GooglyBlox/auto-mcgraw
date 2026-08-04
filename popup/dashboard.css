@@ -1,0 +1,76 @@
+:root {
+  --bg: #111;
+  --surface: #191919;
+  --border: #2a2a2a;
+  --text: #e0e0e0;
+  --muted: #888;
+  --accent: #4d6bfe;
+  --success: #4caf50;
+  --error: #f44336;
+  --warning: #ffb74d;
+}
+
+/* Match the monitoring page scrollbar to the extension's dark UI. */
+html {
+  scrollbar-color: #3d4f9e var(--bg);
+  scrollbar-width: thin;
+}
+
+html::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+html::-webkit-scrollbar-thumb {
+  background: #3d4f9e;
+  border: 3px solid var(--bg);
+  border-radius: 999px;
+}
+
+html::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 620px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.dashboard { max-width: 980px; margin: 0 auto; padding: 28px; }
+.dashboard-header, .panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.eyebrow { margin: 0 0 2px; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+h1, h2 { margin: 0; }
+h1 { font-size: 24px; }
+h2 { font-size: 15px; }
+.subtext, #last-updated { color: var(--muted); }
+.subtext { margin: 4px 0 0; }
+.secondary-button { border: 1px solid var(--border); border-radius: 6px; padding: 8px 11px; background: var(--surface); color: var(--text); cursor: pointer; }
+.secondary-button:hover { border-color: var(--accent); }
+.summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 24px 0 16px; }
+.summary-card, .activity-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.summary-card { padding: 14px; }
+.summary-card span { display: block; color: var(--muted); font-size: 11px; }
+.summary-card strong { display: block; margin-top: 3px; font-size: 24px; }
+.activity-panel { padding: 16px; }
+.activity-list { margin-top: 12px; }
+.activity-row { display: grid; grid-template-columns: 1.35fr .85fr 1.1fr 1.7fr .9fr .8fr; align-items: center; gap: 12px; border-top: 1px solid var(--border); padding: 12px 0; }
+.activity-row:first-child { border-top: 0; }
+.tab-name, .question { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-name { font-weight: 600; }
+.question { color: var(--muted); }
+.status { display: inline-flex; width: fit-content; border-radius: 999px; padding: 3px 8px; background: #2b2b2b; color: var(--muted); font-size: 11px; }
+.status.active { background: rgba(77,107,254,.16); color: #9aaaff; }
+.status.completed { background: rgba(76,175,80,.14); color: #81c784; }
+.status.error { background: rgba(244,67,54,.14); color: #e57373; }
+.status.slow { background: rgba(255,183,77,.14); color: var(--warning); }
+.empty { padding: 28px 0 12px; color: var(--muted); text-align: center; }
+@media (max-width: 700px) { body { min-width: 0; } .dashboard { padding: 18px; } .summary { grid-template-columns: repeat(3, 1fr); } .activity-row { grid-template-columns: 1fr 1fr; } .question { grid-column: 1 / -1; } }
