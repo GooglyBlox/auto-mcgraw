@@ -34,7 +34,7 @@ Reload the extension from `chrome://extensions/` after pulling updates.
 
 ### Install a release ZIP
 
-Download a ZIP from the repository's [releases page](https://github.com/GooglyBlox/auto-mcgraw/releases), extract it, and load the extracted folder using the steps above.
+Download a ZIP from this repository's [releases page](../../releases), extract it, and load the extracted folder using the steps above.
 
 ## Usage
 

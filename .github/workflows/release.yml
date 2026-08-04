@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'manifest.json'
+  workflow_dispatch:
 
 jobs:
   check-version:
@@ -15,7 +16,7 @@ jobs:
       has_changed: ${{ steps.version-check.outputs.has_changed }}
       last_tag: ${{ steps.get-latest-tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       
@@ -49,7 +50,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -71,15 +72,15 @@ jobs:
           zip -r auto-mcgraw.zip \
             manifest.json \
             LICENSE \
-            assets/icon.png \
-            assets/settings-icon.svg \
+            README.md \
+            assets \
             background \
             content-scripts \
             popup
 
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.check-version.outputs.version }}
           name: Release v${{ needs.check-version.outputs.version }}
