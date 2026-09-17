@@ -8,7 +8,15 @@ let pauseBeforeSubmit = false;
 let waitingForDuplicateCompletion = false;
 let currentResponse = null;
 let matchingPauseIntervalId = null;
+let pendingRequestId = null;
+let requestRetries = 0;
+let responseWatchdogId = null;
+let pendingQuestionSignature = null;
 const LOG_PREFIX = "[Auto-McGraw][mhe]";
+// Slightly longer than the assistant-side timeout, so that one normally
+// reports first with a more specific error.
+const RESPONSE_WATCHDOG_MS = 200000;
+const MAX_REQUEST_RETRIES = 1;
 
 chrome.storage.sync.get(["doubleCreditMode", "randomConfidence", "pauseBeforeSubmit"], function (data) {
   doubleCreditMode = data.doubleCreditMode || false;
@@ -54,6 +62,31 @@ function setupMessageListener() {
     }
 
     if (message.type === "processChatGPTResponse") {
+      // Drop answers that belong to an earlier question (e.g. a late reply
+      // after a retry, or one that arrives after automation was stopped).
+      if (!message.isDuplicateTab && !isExpectedResponse(message.requestId)) {
+        console.warn(LOG_PREFIX, "Ignoring stale assistant response");
+        sendResponse({ received: true, ignored: true });
+        return true;
+      }
+      const expectedSignature = pendingQuestionSignature;
+      clearPendingRequest();
+      requestRetries = 0;
+
+      // The page moved on (e.g. the user answered it) while the AI was busy.
+      const currentContainer = document.querySelector(".probe-container");
+      if (
+        !message.isDuplicateTab &&
+        expectedSignature &&
+        currentContainer &&
+        getQuestionSignature(currentContainer) !== expectedSignature
+      ) {
+        console.warn(LOG_PREFIX, "Question changed before the answer arrived");
+        if (isAutomating) checkForNextStep();
+        sendResponse({ received: true, ignored: true });
+        return true;
+      }
+
       if (
         doubleCreditMode &&
         !message.isDuplicateTab &&
@@ -88,10 +121,18 @@ function setupMessageListener() {
       return true;
     }
 
+    if (message.type === "assistantError") {
+      if (isExpectedResponse(message.requestId)) {
+        handleAssistantFailure(
+          message.error || "The assistant reported an error."
+        );
+      }
+      sendResponse({ received: true });
+      return true;
+    }
+
     if (message.type === "stopAutomation") {
-      isAutomating = false;
-      clearMatchingPauseWatcher();
-      updateButtonState();
+      stopAutomation();
       sendResponse({ received: true });
       return true;
     }
@@ -119,12 +160,90 @@ function updateButtonState() {
   });
 }
 
-function handleProcessResponseError(error) {
-  console.error("Error processing response:", error);
+function getAssistantName(callback) {
+  chrome.storage.sync.get("aiModel", (data) => {
+    const names = { chatgpt: "ChatGPT", gemini: "Gemini", deepseek: "DeepSeek" };
+    callback(names[data.aiModel] || "ChatGPT");
+  });
+}
+
+function clearPendingRequest() {
+  pendingRequestId = null;
+  pendingQuestionSignature = null;
+  if (responseWatchdogId !== null) {
+    clearTimeout(responseWatchdogId);
+    responseWatchdogId = null;
+  }
+}
+
+function isExpectedResponse(requestId) {
+  if (!pendingRequestId) return false;
+  return !requestId || requestId === pendingRequestId;
+}
+
+// Stops automation and, if a reason is given, tells the user why instead of
+// failing silently.
+function stopAutomation(reason) {
   isAutomating = false;
   waitingForDuplicateCompletion = false;
+  clearPendingRequest();
   clearMatchingPauseWatcher();
   updateButtonState();
+
+  if (reason) {
+    console.warn(LOG_PREFIX, "Automation stopped:", reason);
+    alert(`Auto-McGraw stopped: ${reason}`);
+  }
+}
+
+function sendQuestionToAssistant(questionData, questionSignature) {
+  clearPendingRequest();
+
+  const requestId = `${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+  pendingRequestId = requestId;
+  pendingQuestionSignature = questionSignature;
+  responseWatchdogId = setTimeout(() => {
+    if (pendingRequestId === requestId) {
+      handleAssistantFailure("No answer was received from the assistant.");
+    }
+  }, RESPONSE_WATCHDOG_MS);
+
+  chrome.runtime.sendMessage({
+    type: "sendQuestionToChatGPT",
+    question: questionData,
+    requestId,
+  });
+}
+
+// Retries the current question once, then stops with an explanation.
+function handleAssistantFailure(reason) {
+  clearPendingRequest();
+  if (!isAutomating) return;
+
+  if (requestRetries < MAX_REQUEST_RETRIES) {
+    requestRetries += 1;
+    console.warn(LOG_PREFIX, "Retrying question after:", reason);
+    checkForNextStep();
+    return;
+  }
+
+  requestRetries = 0;
+  getAssistantName((name) => {
+    stopAutomation(
+      `${reason}\n\nMake sure ${name} is open, signed in and not showing an error or popup, then click "Ask ${name}" to continue.`
+    );
+  });
+}
+
+function handleProcessResponseError(error) {
+  console.error("Error processing response:", error);
+  stopAutomation(
+    `Something went wrong while applying the answer (${
+      error && error.message ? error.message : error
+    }).`
+  );
 }
 
 function processDoubleCreditResponse(responseText) {
@@ -141,22 +260,26 @@ function processDoubleCreditResponse(responseText) {
     if (!container) return;
 
     if (container.querySelector(".awd-probe-type-matching")) {
-      alert(
-        "Matching questions are not supported in double credit mode. Please complete manually."
+      stopAutomation(
+        "Matching questions are not supported in double credit mode. Please complete this one manually."
       );
-      isAutomating = false;
-      updateButtonState();
       return;
     }
 
-    fillInAnswers(answers, container);
+    if (!fillInAnswers(answers, container)) {
+      pauseForManualAnswer(
+        container,
+        "Couldn't match the AI's answer to this question's choices.",
+        flattenAnswerValues(answers)
+      );
+      return;
+    }
 
     waitingForDuplicateCompletion = true;
     chrome.runtime.sendMessage({ type: "createDuplicateTab" });
   } catch (e) {
     console.error("Error processing double credit response:", e);
-    isAutomating = false;
-    updateButtonState();
+    stopAutomation(`Something went wrong in double credit mode (${e.message}).`);
   }
 }
 
@@ -238,58 +361,74 @@ function completeDoubleCreditFlow() {
         })
         .catch((error) => {
           console.error("Automation error:", error);
-          isAutomating = false;
-          updateButtonState();
+          stopAutomation(
+            "Couldn't find SmartBook's Next button after submitting the answer."
+          );
         });
     }, 800);
+  }).catch(() => {
+    chrome.runtime.sendMessage({ type: "resetTabTracking" });
+    stopAutomation(
+      "The answer was filled in, but SmartBook didn't accept it. Please answer this question manually."
+    );
   });
 }
 
+function getChoiceInputs(container) {
+  return Array.from(
+    container.querySelectorAll('input[type="radio"], input[type="checkbox"]')
+  )
+    .map((input) => {
+      const textEl = input.closest("label")?.querySelector(".choiceText");
+      return { input, text: textEl ? getReadableText(textEl) : "" };
+    })
+    .filter((choice) => choice.text);
+}
+
+// Applies the AI's answer to the current question. Returns true if at least
+// one blank was filled or one choice was selected.
 function fillInAnswers(answers, container) {
+  const answerList = flattenAnswerValues(answers);
 
   if (container.querySelector(".awd-probe-type-fill_in_the_blank")) {
-    const inputs = container.querySelectorAll("input.fitb-input");
+    const inputs = Array.from(container.querySelectorAll("input.fitb-input"));
+    let values = answerList;
+    if (values.length === 1 && inputs.length > 1) {
+      const parts = values[0].split(/\s*[;,]\s*/).filter(Boolean);
+      if (parts.length === inputs.length) {
+        values = parts;
+      }
+    }
 
+    let filled = 0;
     inputs.forEach((input, index) => {
-      if (answers[index]) {
-        input.value = answers[index];
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      }
+      if (values[index] === undefined) return;
+      input.value = values[index];
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      filled += 1;
     });
-  } else {
-    const choices = container.querySelectorAll(
-      'input[type="radio"], input[type="checkbox"]'
-    );
-
-    choices.forEach((choice, index) => {
-      const label = choice.closest("label");
-      if (label) {
-        const choiceText = label
-          .querySelector(".choiceText")
-          ?.textContent.trim();
-
-        if (choiceText) {
-          const shouldBeSelected = answers.some((ans) => {
-            const match1 = choiceText === ans;
-            const choiceWithoutPeriod = choiceText.replace(/\.$/, "");
-            const answerWithoutPeriod = ans.replace(/\.$/, "");
-            const match2 = choiceWithoutPeriod === answerWithoutPeriod;
-            const match3 = choiceText === ans + ".";
-            const match4 = choiceText.includes(ans) || ans.includes(choiceText);
-
-            if (match1 || match2 || match3 || match4) {
-              return true;
-            }
-            return false;
-          });
-
-          if (shouldBeSelected) {
-            choice.click();
-          }
-        }
-      }
-    });
+    return filled > 0;
   }
+
+  const choices = getChoiceInputs(container);
+  const allowMultiple = choices.some(
+    (choice) => choice.input.type === "checkbox"
+  );
+  const indices = resolveChoiceIndices(
+    choices.map((choice) => choice.text),
+    answerList,
+    allowMultiple
+  );
+
+  indices.forEach((index) => {
+    const { input } = choices[index];
+    if (!input.checked) {
+      input.click();
+    }
+  });
+
+  return indices.length > 0;
 }
 
 function checkForCorrectAnswer(container) {
@@ -338,10 +477,18 @@ function clearMatchingPauseWatcher() {
   }
 }
 
+function getProbeId(container) {
+  return (
+    container?.querySelector("[data-probe-id]")?.getAttribute("data-probe-id") ||
+    ""
+  );
+}
+
 function getQuestionSignature(container) {
   if (!container) return "";
 
   const questionType = detectQuestionType(container);
+  const probeId = getProbeId(container);
   if (questionType === "matching") {
     const promptText =
       container.querySelector(".prompt")?.textContent?.trim() || "";
@@ -352,15 +499,33 @@ function getQuestionSignature(container) {
       .filter(Boolean)
       .join("|");
 
-    return `${questionType}::${normalizeChoiceText(promptText)}::${prompts}`;
+    return `${probeId}::${questionType}::${normalizeChoiceText(promptText)}::${prompts}`;
   }
 
   const promptText = container.querySelector(".prompt")?.textContent?.trim() || "";
 
-  return `${questionType}::${normalizeChoiceText(promptText)}`;
+  return `${probeId}::${questionType}::${normalizeChoiceText(promptText)}`;
 }
 
-function pauseForManualMatchingAndResume(questionSignature) {
+// Used when an answer can't be applied automatically: shows what the AI
+// suggested, then waits for the user to answer and move on by themselves.
+function pauseForManualAnswer(container, heading, answerLines) {
+  const questionSignature = getQuestionSignature(container);
+  const suggestion =
+    answerLines && answerLines.length
+      ? `AI answer:\n${answerLines.join("\n")}`
+      : "The AI did not return a usable answer.";
+
+  alert(
+    `${heading}\n\n${suggestion}\n\nPlease answer this question yourself, then click a confidence button and Next. Automation will resume on the next question.`
+  );
+
+  if (isAutomating) {
+    pauseForManualAnswerAndResume(questionSignature);
+  }
+}
+
+function pauseForManualAnswerAndResume(questionSignature) {
   if (!questionSignature) return;
 
   clearMatchingPauseWatcher();
@@ -376,7 +541,11 @@ function pauseForManualMatchingAndResume(questionSignature) {
     if (!currentContainer) return;
 
     const currentSignature = getQuestionSignature(currentContainer);
-    if (currentSignature && currentSignature !== questionSignature) {
+    if (
+      currentSignature &&
+      currentSignature !== questionSignature &&
+      isQuestionAnswerable(currentContainer)
+    ) {
       clearMatchingPauseWatcher();
 
       setTimeout(() => {
@@ -414,9 +583,9 @@ function handleForcedLearning() {
         })
         .catch((error) => {
           console.error("Error in forced learning flow:", error);
-          isAutomating = false;
-          clearMatchingPauseWatcher();
-          updateButtonState();
+          stopAutomation(
+            "Couldn't get through the required reading section. Please return to the questions manually, then start automation again."
+          );
         });
       return true;
     }
@@ -424,7 +593,20 @@ function handleForcedLearning() {
   return false;
 }
 
-function checkForNextStep() {
+// After an answer is submitted the question switches to review mode and stays
+// on screen until SmartBook loads the next one, which can take a while on a
+// slow connection. Only questions still in testing mode can be answered.
+function isQuestionAnswerable(container) {
+  if (container.querySelector('[class*="awd-probe-mode-"]')) {
+    return !!container.querySelector(".awd-probe-mode-testing");
+  }
+  return (
+    !container.querySelector(".awd-probe-correctness") &&
+    !document.querySelector(".next-button")
+  );
+}
+
+function checkForNextStep(attempt = 0) {
   if (!isAutomating) return;
 
   if (handleTopicOverview()) {
@@ -436,15 +618,35 @@ function checkForNextStep() {
   }
 
   const container = document.querySelector(".probe-container");
-  if (container && !container.querySelector(".forced-learning")) {
+  if (
+    container &&
+    !container.querySelector(".forced-learning") &&
+    isQuestionAnswerable(container)
+  ) {
     const qData = parseQuestion();
     if (qData) {
-      chrome.runtime.sendMessage({
-        type: "sendQuestionToChatGPT",
-        question: qData,
-      });
+      sendQuestionToAssistant(qData, getQuestionSignature(container));
     }
+    return;
   }
+
+  // Still showing a question that was already answered (e.g. automation was
+  // started on one, or a Next click didn't register): move on. Wait a few
+  // seconds first so this doesn't double-click while the next one loads.
+  const nextButton = document.querySelector(".next-button");
+  if (nextButton && attempt % 6 === 5) {
+    nextButton.click();
+  }
+
+  // The next question may still be loading.
+  if (attempt < 30) {
+    setTimeout(() => checkForNextStep(attempt + 1), 500);
+    return;
+  }
+
+  stopAutomation(
+    "No new question appeared. If the assignment is complete you're done; otherwise go to the next question and start automation again."
+  );
 }
 
 function detectQuestionType(container) {
@@ -465,6 +667,15 @@ function detectQuestionType(container) {
   }
   if (container.querySelector(".awd-probe-type-matching")) {
     return "matching";
+  }
+  // Unknown probe types that still use ordinary radio buttons or checkboxes.
+  if (container.querySelector(".choiceText")) {
+    if (container.querySelector('input[type="checkbox"]')) {
+      return "multiple_select";
+    }
+    if (container.querySelector('input[type="radio"]')) {
+      return "multiple_choice";
+    }
   }
   return "";
 }
@@ -522,6 +733,136 @@ function isAnswerMatch(choiceText, answerText) {
     normalizeChoiceText(stripWrappingQuotes(choice)) ===
     normalizeChoiceText(stripWrappingQuotes(answer))
   );
+}
+
+// Returns an element's text in a form an AI can read: tables become one row
+// per line with " | " between cells, images become their alt text, and the
+// screen-reader-only "Blank" label next to blanks is dropped.
+function getReadableText(element) {
+  if (!element) return "";
+
+  const clone = element.cloneNode(true);
+
+  clone.querySelectorAll("span._visuallyHidden").forEach((span) => {
+    if (/^\s*blank\s*$/i.test(span.textContent)) {
+      span.remove();
+    }
+  });
+
+  clone.querySelectorAll("table").forEach((table) => {
+    const lines = [];
+    const caption = table.querySelector("caption");
+    if (caption && caption.textContent.trim()) {
+      lines.push(caption.textContent.replace(/\s+/g, " ").trim());
+    }
+    table.querySelectorAll("tr").forEach((row) => {
+      const cells = Array.from(row.querySelectorAll("th, td")).map((cell) =>
+        cell.textContent.replace(/\s+/g, " ").trim()
+      );
+      if (cells.some(Boolean)) {
+        lines.push(cells.join(" | "));
+      }
+    });
+    table.replaceWith(document.createTextNode(`\n${lines.join("\n")}\n`));
+  });
+
+  clone.querySelectorAll("img").forEach((img) => {
+    const alt = (img.getAttribute("alt") || "").trim();
+    img.replaceWith(document.createTextNode(alt ? ` [Image: ${alt}] ` : " "));
+  });
+
+  clone.querySelectorAll("br").forEach((br) => {
+    br.replaceWith(document.createTextNode("\n"));
+  });
+  clone.querySelectorAll("p, li, div").forEach((block) => {
+    block.appendChild(document.createTextNode("\n"));
+  });
+
+  return clone.textContent
+    .replace(/[ \t\u00a0]+/g, " ")
+    .replace(/ *\n[\s]*/g, "\n")
+    .trim();
+}
+
+function normalizeForMatch(text) {
+  return normalizeChoiceText(stripWrappingQuotes(String(text ?? "")))
+    .toLowerCase()
+    .replace(/["'`]/g, "")
+    .replace(/[.;:,!?]+$/, "")
+    .trim();
+}
+
+// Resolves one AI answer to a choice index. Tries an exact (case-insensitive)
+// match, then answers given as an option number or letter ("2", "B",
+// "B. text"), then the closest choice that contains or is contained by it.
+function findChoiceIndex(choiceTexts, answer) {
+  const normalizedChoices = choiceTexts.map(normalizeForMatch);
+  const normalizedAnswer = normalizeForMatch(answer);
+  if (!normalizedAnswer) return -1;
+
+  let index = normalizedChoices.indexOf(normalizedAnswer);
+  if (index !== -1) return index;
+
+  const labelOnly = normalizedAnswer.match(/^(?:option\s+)?\(?([a-z]|\d{1,2})\)?$/i);
+  if (labelOnly) {
+    const label = labelOnly[1];
+    const labelIndex = /\d/.test(label)
+      ? Number(label) - 1
+      : label.charCodeAt(0) - 97;
+    if (labelIndex >= 0 && labelIndex < choiceTexts.length) return labelIndex;
+  }
+
+  const withoutLabel = normalizedAnswer
+    .replace(/^(?:option\s+)?\(?(?:[a-z]|\d{1,2})[.):]\s+/i, "")
+    .trim();
+  if (withoutLabel !== normalizedAnswer) {
+    index = normalizedChoices.indexOf(withoutLabel);
+    if (index !== -1) return index;
+  }
+
+  const toWords = (text) => ` ${text.replace(/[^a-z0-9]+/g, " ").trim()} `;
+  const answerWords = [normalizedAnswer, withoutLabel].map(toWords);
+
+  let bestIndex = -1;
+  let bestScore = 0;
+  let candidateCount = 0;
+  normalizedChoices.forEach((choice, choiceIndex) => {
+    const choiceWords = toWords(choice);
+    if (!choiceWords.trim()) return;
+
+    let choiceScore = 0;
+    for (const words of answerWords) {
+      if (!words.trim()) continue;
+      if (choiceWords.includes(words) || words.includes(choiceWords)) {
+        const score =
+          Math.min(choiceWords.length, words.length) /
+          Math.max(choiceWords.length, words.length);
+        choiceScore = Math.max(choiceScore, score);
+      }
+    }
+
+    if (choiceScore > 0) {
+      candidateCount += 1;
+      if (choiceScore > bestScore) {
+        bestScore = choiceScore;
+        bestIndex = choiceIndex;
+      }
+    }
+  });
+
+  return candidateCount === 1 || bestScore >= 0.5 ? bestIndex : -1;
+}
+
+function resolveChoiceIndices(choiceTexts, answers, allowMultiple) {
+  const indices = [];
+  for (const answer of answers) {
+    const index = findChoiceIndex(choiceTexts, answer);
+    if (index !== -1 && !indices.includes(index)) {
+      indices.push(index);
+      if (!allowMultiple) break;
+    }
+  }
+  return indices;
 }
 
 function extractCorrectAnswer() {
@@ -798,7 +1139,7 @@ function getQuestionChoices(container, questionType) {
   }
 
   return Array.from(container.querySelectorAll(".choiceText"))
-    .map((el) => el.textContent.trim())
+    .map((el) => getReadableText(el))
     .filter(Boolean);
 }
 
@@ -1576,92 +1917,95 @@ async function processChatGPTResponse(responseText) {
   lastIncorrectQuestion = null;
   lastCorrectAnswer = null;
 
+  let applied = false;
   if (questionType === "matching") {
-    const applied = await applyMatchingAnswer(container, response.answer);
+    applied = await applyMatchingAnswer(container, response.answer);
     if (!applied) {
-      const questionSignature = getQuestionSignature(container);
-      alert(
-        "Matching Question Solution:\n\n" +
-          (answers.length ? answers.join("\n") : "No confident matches parsed.") +
-          "\n\nPlease input these matches manually, then click high confidence and next. Automation will resume after you move to the next question."
+      pauseForManualAnswer(
+        container,
+        "Matching question: the matches couldn't be placed automatically.",
+        answers
       );
-
-      if (isAutomating) {
-        pauseForManualMatchingAndResume(questionSignature);
-      }
-
       return;
     }
   } else if (questionType === "select_text") {
-    const choices = container.querySelectorAll(
-      ".select-text-component .choice.-interactive"
+    const choices = Array.from(
+      container.querySelectorAll(".select-text-component .choice.-interactive")
     );
-
-    choices.forEach((choice) => {
-      const choiceText = choice.textContent.trim();
-      if (!choiceText) return;
-
-      const shouldBeSelected = answers.some((ans) =>
-        isAnswerMatch(choiceText, ans)
-      );
-
-      if (shouldBeSelected) {
-        choice.click();
-      }
-    });
-  } else {
-    fillInAnswers(answers, container);
+    const indices = resolveChoiceIndices(
+      choices.map((choice) => choice.textContent.trim()),
+      answers,
+      true
+    );
+    indices.forEach((index) => choices[index].click());
+    applied = indices.length > 0;
+  } else if (questionType) {
+    applied = fillInAnswers(answers, container);
   }
 
-  if (isAutomating) {
-    if (pauseBeforeSubmit) {
-      waitForElement(".next-button", 120000)
-        .then((nextButton) => {
-          const observer = new MutationObserver(() => {
-            if (nextButton.offsetParent === null) {
-              observer.disconnect();
-              setTimeout(() => {
-                checkForNextStep();
-              }, 1000);
-            }
-          });
-          observer.observe(document.body, { childList: true, subtree: true });
-        })
-        .catch(() => {});
-    } else {
-      waitForElement(
-        getConfidenceSelector(),
-        10000
-      )
-        .then((button) => {
-          button.click();
+  if (!isAutomating) return;
 
-          setTimeout(() => {
-            checkForCorrectAnswer(container);
+  if (!applied) {
+    pauseForManualAnswer(
+      container,
+      questionType
+        ? "Couldn't match the AI's answer to this question's choices."
+        : "This question type isn't supported yet.",
+      answers
+    );
+    return;
+  }
 
-            waitForElement(".next-button", 10000)
-              .then((nextButton) => {
-                nextButton.click();
-                setTimeout(() => {
-                  checkForNextStep();
-                }, 1000);
-              })
-              .catch((error) => {
-                console.error("Automation error:", error);
-                isAutomating = false;
-                clearMatchingPauseWatcher();
-                updateButtonState();
-              });
-          }, 1000);
-        })
-        .catch((error) => {
-          console.error("Automation error:", error);
-          isAutomating = false;
-          clearMatchingPauseWatcher();
-          updateButtonState();
+  if (pauseBeforeSubmit) {
+    waitForElement(".next-button", 120000)
+      .then((nextButton) => {
+        const observer = new MutationObserver(() => {
+          if (nextButton.offsetParent === null) {
+            observer.disconnect();
+            setTimeout(() => {
+              checkForNextStep();
+            }, 1000);
+          }
         });
-    }
+        observer.observe(document.body, { childList: true, subtree: true });
+      })
+      .catch(() => {});
+    return;
   }
+
+  let confidenceButton;
+  try {
+    // The confidence buttons stay disabled until SmartBook accepts an answer.
+    confidenceButton = await waitForElement(getConfidenceSelector(), 5000);
+  } catch (error) {
+    pauseForManualAnswer(
+      container,
+      "The answer was filled in, but SmartBook didn't accept it.",
+      answers
+    );
+    return;
+  }
+  if (!isAutomating) return;
+
+  confidenceButton.click();
+  await delay(1000);
+  checkForCorrectAnswer(container);
+
+  let nextButton;
+  try {
+    nextButton = await waitForElement(".next-button", 10000);
+  } catch (error) {
+    stopAutomation(
+      "Couldn't find SmartBook's Next button after submitting the answer."
+    );
+    return;
+  }
+  if (!isAutomating) return;
+
+  nextButton.click();
+  setTimeout(() => {
+    checkForNextStep();
+  }, 1000);
 }
 
 function addAssistantButton() {
@@ -1688,11 +2032,8 @@ function addAssistantButton() {
       btn.style.borderBottomRightRadius = "0";
       btn.addEventListener("click", () => {
         if (isAutomating) {
-          isAutomating = false;
-          waitingForDuplicateCompletion = false;
-          clearMatchingPauseWatcher();
+          stopAutomation();
           chrome.runtime.sendMessage({ type: "resetTabTracking" });
-          updateButtonState();
         } else {
           const modeText = doubleCreditMode
             ? " Double credit mode is enabled."
@@ -1702,6 +2043,7 @@ function addAssistantButton() {
           );
           if (proceed) {
             isAutomating = true;
+            requestRetries = 0;
             clearMatchingPauseWatcher();
             btn.textContent = "Stop Automation";
             checkForNextStep();
@@ -1785,9 +2127,9 @@ function parseQuestion() {
       }
     });
 
-    questionText = promptClone.textContent.trim();
+    questionText = getReadableText(promptClone);
   } else {
-    questionText = promptEl ? promptEl.textContent.trim() : "";
+    questionText = getReadableText(promptEl);
   }
 
   let options = [];
@@ -1808,9 +2150,7 @@ function parseQuestion() {
       .map((el) => el.textContent.trim())
       .filter(Boolean);
   } else if (questionType !== "fill_in_the_blank") {
-    container.querySelectorAll(".choiceText").forEach((el) => {
-      options.push(el.textContent.trim());
-    });
+    options = getQuestionChoices(container, questionType);
   }
 
   return {
@@ -1826,19 +2166,42 @@ function parseQuestion() {
   };
 }
 
+// Resolves with the first element matching `selector`. Uses a MutationObserver
+// as well as polling, since Chrome throttles timers in background tabs.
 function waitForElement(selector, timeout = 5000) {
   return new Promise((resolve, reject) => {
-    const startTime = Date.now();
-    const interval = setInterval(() => {
-      const el = document.querySelector(selector);
+    const existing = document.querySelector(selector);
+    if (existing) {
+      resolve(existing);
+      return;
+    }
+
+    let done = false;
+    const finish = (el) => {
+      if (done) return;
+      done = true;
+      observer.disconnect();
+      clearInterval(interval);
+      clearTimeout(timer);
       if (el) {
-        clearInterval(interval);
         resolve(el);
-      } else if (Date.now() - startTime > timeout) {
-        clearInterval(interval);
+      } else {
         reject(new Error("Element not found: " + selector));
       }
-    }, 100);
+    };
+    const check = () => {
+      const el = document.querySelector(selector);
+      if (el) finish(el);
+    };
+
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+    });
+    const interval = setInterval(check, 100);
+    const timer = setTimeout(() => finish(document.querySelector(selector)), timeout);
   });
 }
 

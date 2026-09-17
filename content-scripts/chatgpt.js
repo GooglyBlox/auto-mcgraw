@@ -1,191 +1,112 @@
-let hasResponded = false;
-let messageCountAtQuestion = 0;
-let observationStartTime = 0;
-let observationTimeout = null;
-let observer = null;
+// ChatGPT ships two different UIs: the ProseMirror composer with
+// [data-message-author-role] turns, and a newer one with a plain
+// <textarea name="prompt"> and <li data-message-role> turns. Support both.
+var CHATGPT_INPUT_SELECTORS = [
+  "#prompt-textarea",
+  'textarea[name="prompt"]',
+  "#mobile-composer-prompt",
+  'div[contenteditable="true"][role="textbox"]',
+];
+var CHATGPT_SEND_SELECTORS = [
+  '[data-testid="send-button"]',
+  'button[aria-label="Send message"]',
+  'button[aria-label="Send prompt"]',
+];
+var CHATGPT_STOP_SELECTORS = [
+  '[data-testid="stop-button"]',
+  'button[aria-label="Stop streaming"]',
+  'button[aria-label="Stop generating"]',
+  'button[aria-label="Stop"]',
+];
+var CHATGPT_RESPONSE_SELECTOR =
+  '[data-message-author-role="assistant"], li[data-message-role="assistant"]';
+var CHATGPT_USER_SELECTOR =
+  '[data-message-author-role="user"], li[data-message-role="user"]';
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "receiveQuestion") {
-    resetObservation();
-
-    const messages = document.querySelectorAll(
-      '[data-message-author-role="assistant"]'
-    );
-    messageCountAtQuestion = messages.length;
-    hasResponded = false;
-
-    insertQuestion(message.question)
-      .then(() => {
-        sendResponse({ received: true, status: "processing" });
-      })
-      .catch((error) => {
-        sendResponse({ received: false, error: error.message });
-      });
-
-    return true;
-  }
-});
-
-function resetObservation() {
-  hasResponded = false;
-  if (observationTimeout) {
-    clearTimeout(observationTimeout);
-    observationTimeout = null;
-  }
-  if (observer) {
-    observer.disconnect();
-    observer = null;
-  }
+function getChatGPTResponses() {
+  return Array.from(document.querySelectorAll(CHATGPT_RESPONSE_SELECTOR));
 }
 
-async function insertQuestion(questionData) {
-  const { type, question, options, previousCorrection } = questionData;
-  let text = `Type: ${type}\nQuestion: ${question}`;
+function getChatGPTMessageId(node) {
+  return node.getAttribute("data-message-id") || node.id || null;
+}
 
-  if (
-    previousCorrection &&
-    previousCorrection.question &&
-    previousCorrection.correctAnswer
-  ) {
-    text =
-      `CORRECTION FROM PREVIOUS ANSWER: For the question "${
-        previousCorrection.question
-      }", your answer was incorrect. The correct answer was: ${JSON.stringify(
-        previousCorrection.correctAnswer
-      )}\n\nNow answer this new question:\n\n` + text;
+function isChatGPTGenerating(node) {
+  if (node && node.hasAttribute("data-message-role")) {
+    return !node.hasAttribute("data-message-complete");
+  }
+  return (
+    !!queryFirst(CHATGPT_STOP_SELECTORS) ||
+    !!(node && node.querySelector(".result-streaming"))
+  );
+}
+
+function findChatGPTSendButton() {
+  for (const selector of CHATGPT_SEND_SELECTORS) {
+    const button = document.querySelector(selector);
+    if (isButtonUsable(button)) return button;
+  }
+  return null;
+}
+
+async function askChatGPT(text) {
+  const input = await waitForValue(
+    () => queryFirst(CHATGPT_INPUT_SELECTORS),
+    10000
+  );
+  if (!input) {
+    throw new Error("Could not find the ChatGPT message box.");
   }
 
-  if (type === "matching") {
-    text +=
-      "\nPrompts:\n" +
-      options.prompts.map((prompt, i) => `${i + 1}. ${prompt}`).join("\n");
-    text +=
-      "\nChoices:\n" +
-      options.choices.map((choice, i) => `${i + 1}. ${choice}`).join("\n");
-    text +=
-      '\n\nPlease match each prompt with the correct choice. Set "answer" to an array of strings using the exact format \'Prompt -> Choice\'. Include one entry per prompt, use exact prompt and choice text, and use each choice at most once.';
-  } else if (type === "fill_in_the_blank") {
-    text +=
-      "\n\nThis is a fill in the blank question. If there are multiple blanks, provide answers as an array in order of appearance. For a single blank, you can provide a string.";
-  } else if (options && options.length > 0) {
-    text +=
-      "\nOptions:\n" + options.map((opt, i) => `${i + 1}. ${opt}`).join("\n");
-    text +=
-      "\n\nIMPORTANT: Your answer must EXACTLY match one of the above options. Do not include numbers in your answer. If there are periods, include them.";
-  }
+  // Don't send while a previous answer is still streaming; the send button is
+  // replaced by a stop button until it finishes.
+  await waitForValue(() => !queryFirst(CHATGPT_STOP_SELECTORS), 90000, 500);
 
-  text +=
-    '\n\nIMPORTANT: Your answer should be in a JSON code block.' +
-    '\n\nPlease provide your answer in JSON format with keys "answer" and "explanation". Explanations should be no more than one sentence. DO NOT acknowledge the correction in your response, only answer the new question.';
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const userCountBefore = document.querySelectorAll(
+      CHATGPT_USER_SELECTOR
+    ).length;
+    const snapshot = snapshotResponses(
+      getChatGPTResponses(),
+      getChatGPTMessageId
+    );
 
-  return new Promise((resolve, reject) => {
-    const inputArea = document.getElementById("prompt-textarea");
-    if (inputArea) {
-      setTimeout(() => {
-        inputArea.focus();
-        inputArea.innerHTML = `<p>${text}</p>`;
-        inputArea.dispatchEvent(new Event("input", { bubbles: true }));
+    if (!setComposerText(input, text)) {
+      throw new Error("Could not type into the ChatGPT message box.");
+    }
 
-        setTimeout(() => {
-          const sendButton = document.querySelector(
-            '[data-testid="send-button"]'
-          );
-          if (sendButton) {
-            sendButton.click();
-            startObserving();
-            resolve();
-          } else {
-            reject(new Error("Send button not found"));
-          }
-        }, 300);
-      }, 300);
+    const sendButton = await waitForValue(findChatGPTSendButton, 10000);
+    if (sendButton) {
+      sendButton.click();
+    } else if (input.form && typeof input.form.requestSubmit === "function") {
+      input.form.requestSubmit();
     } else {
-      reject(new Error("Input area not found"));
+      throw new Error("Could not find the ChatGPT send button.");
     }
-  });
-}
 
-function startObserving() {
-  observationStartTime = Date.now();
-  observationTimeout = setTimeout(() => {
-    if (!hasResponded) {
-      resetObservation();
-    }
-  }, 180000);
-
-  observer = new MutationObserver((mutations) => {
-    if (hasResponded) return;
-
-    const messages = document.querySelectorAll(
-      '[data-message-author-role="assistant"]'
+    const sent = await waitForValue(
+      () =>
+        !getComposerText(input).trim() ||
+        !!queryFirst(CHATGPT_STOP_SELECTORS) ||
+        document.querySelectorAll(CHATGPT_USER_SELECTOR).length >
+          userCountBefore,
+      5000
     );
-    if (!messages.length) return;
 
-    if (messages.length <= messageCountAtQuestion) return;
-
-    const latestMessage = messages[messages.length - 1];
-    const codeBlocks = latestMessage.querySelectorAll("pre code");
-    let responseText = "";
-
-    for (const block of codeBlocks) {
-      if (block.className.includes("language-json")) {
-        responseText = block.textContent.trim();
-        break;
-      }
+    if (sent) {
+      return {
+        snapshot,
+        getResponseNodes: getChatGPTResponses,
+        getNodeId: getChatGPTMessageId,
+        isGenerating: isChatGPTGenerating,
+      };
     }
+  }
 
-    if (!responseText) {
-      responseText = latestMessage.textContent.trim();
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) responseText = jsonMatch[0];
-    }
-
-    responseText = responseText
-      .replace(/[\u200B-\u200D\uFEFF]/g, "")
-      .replace(/\n\s*/g, " ")
-      .trim();
-
-    try {
-      const parsed = JSON.parse(responseText);
-      if (parsed.answer && !hasResponded) {
-        hasResponded = true;
-        chrome.runtime
-          .sendMessage({
-            type: "chatGPTResponse",
-            response: responseText,
-          })
-          .then(() => {
-            resetObservation();
-          })
-          .catch((error) => {
-            console.error("Error sending response:", error);
-          });
-      }
-    } catch (e) {
-      const isGenerating = latestMessage.querySelector(".result-streaming");
-      if (!isGenerating && Date.now() - observationStartTime > 30000) {
-        const responseText = latestMessage.textContent.trim();
-        try {
-          const jsonPattern =
-            /\{[\s\S]*?"answer"[\s\S]*?"explanation"[\s\S]*?\}/;
-          const jsonMatch = responseText.match(jsonPattern);
-
-          if (jsonMatch && !hasResponded) {
-            hasResponded = true;
-            chrome.runtime.sendMessage({
-              type: "chatGPTResponse",
-              response: jsonMatch[0],
-            });
-            resetObservation();
-          }
-        } catch (e) {}
-      }
-    }
-  });
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-  });
+  throw new Error("ChatGPT did not accept the message.");
 }
+
+registerAssistant({
+  responseType: "chatGPTResponse",
+  askAssistant: askChatGPT,
+});

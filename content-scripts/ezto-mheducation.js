@@ -21,6 +21,14 @@ function setupMessageListener() {
       sendResponse({ received: true });
       return true;
     }
+
+    if (message.type === "assistantError") {
+      if (isAutomating) {
+        stopAutomation(`The assistant couldn't answer (${message.error})`);
+      }
+      sendResponse({ received: true });
+      return true;
+    }
   };
 
   chrome.runtime.onMessage.addListener(messageListener);
@@ -221,24 +229,34 @@ function processChatGPTResponse(responseText) {
   }
 }
 
+// The AI may answer with a string, a one-element array, or a boolean.
+function answerToText(answer) {
+  const value = Array.isArray(answer) ? answer[0] : answer;
+  return value === null || value === undefined ? "" : String(value).trim();
+}
+
 function handleMultipleChoiceAnswer(answer) {
   const radioButtons = document.querySelectorAll(
     '.answers--mc input[type="radio"]'
   );
   const labels = document.querySelectorAll(".answers--mc .answer__label--mc");
+  const answerText = answerToText(answer).toLowerCase().replace(/\.$/, "");
+  if (!answerText) return;
 
-  for (let i = 0; i < labels.length; i++) {
-    const labelText = labels[i].textContent.trim().replace(/^[a-z]\s+/, "");
+  const labelTexts = Array.from(labels).map((label) =>
+    label.textContent.trim().replace(/^[a-z]\s+/, "").toLowerCase().replace(/\.$/, "")
+  );
 
-    if (
-      labelText === answer ||
-      labelText.replace(/\.$/, "") === answer.replace(/\.$/, "") ||
-      labelText.includes(answer) ||
-      answer.includes(labelText)
-    ) {
-      radioButtons[i].click();
-      break;
-    }
+  let index = labelTexts.indexOf(answerText);
+  if (index === -1) {
+    index = labelTexts.findIndex(
+      (labelText) =>
+        labelText && (labelText.includes(answerText) || answerText.includes(labelText))
+    );
+  }
+
+  if (index !== -1 && radioButtons[index]) {
+    radioButtons[index].click();
   }
 }
 
@@ -253,12 +271,9 @@ function handleTrueFalseAnswer(answer) {
     
     const fullText = buttonSpan.textContent;
     
-    const buttonText = fullText.trim().split(",")[0].trim();
+    const buttonText = fullText.trim().split(",")[0].trim().toLowerCase();
 
-    if (
-      (buttonText === "True" && (answer === "True" || answer === true)) ||
-      (buttonText === "False" && (answer === "False" || answer === false))
-    ) {
+    if (buttonText && buttonText === answerToText(answer).toLowerCase()) {
       button.click();
       return;
     }

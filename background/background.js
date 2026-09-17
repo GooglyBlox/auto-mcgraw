@@ -3,8 +3,6 @@ let aiTabId = null;
 let aiType = null;
 let lastActiveTabId = null;
 let processingQuestion = false;
-let mheWindowId = null;
-let aiWindowId = null;
 let duplicateTabId = null;
 let originalTabId = null;
 let storedResponse = null;
@@ -13,6 +11,20 @@ let pendingResponse = null;
 const DEEPSEEK_URL_PATTERNS = [
   "https://chat.deepseek.com/*",
 ];
+const MHE_URL_PATTERNS = [
+  "https://learning.mheducation.com/*",
+  "https://ezto.mheducation.com/*",
+];
+const ASSISTANT_SCRIPTS = {
+  chatgpt: "content-scripts/chatgpt.js",
+  gemini: "content-scripts/gemini.js",
+  deepseek: "content-scripts/deepseek.js",
+};
+const ASSISTANT_NAMES = {
+  chatgpt: "ChatGPT",
+  gemini: "Gemini",
+  deepseek: "DeepSeek",
+};
 
 function isDeepSeekTabUrl(url = "") {
   return url.includes("chat.deepseek.com") || url.includes("deepseek.chat");
@@ -65,15 +77,9 @@ async function focusTab(tabId) {
 }
 
 async function findAndStoreTabs() {
-  const mheTabs = await chrome.tabs.query({
-    url: [
-      "https://learning.mheducation.com/*",
-      "https://ezto.mheducation.com/*",
-    ],
-  });
+  const mheTabs = await chrome.tabs.query({ url: MHE_URL_PATTERNS });
   if (mheTabs.length > 0) {
     mheTabId = mheTabs[0].id;
-    mheWindowId = mheTabs[0].windowId;
   }
 
   const data = await chrome.storage.sync.get("aiModel");
@@ -84,7 +90,6 @@ async function findAndStoreTabs() {
     const tabs = await chrome.tabs.query({ url: "https://chatgpt.com/*" });
     if (tabs.length > 0) {
       aiTabId = tabs[0].id;
-      aiWindowId = tabs[0].windowId;
     } else {
       aiTabId = null;
     }
@@ -94,7 +99,6 @@ async function findAndStoreTabs() {
     });
     if (tabs.length > 0) {
       aiTabId = tabs[0].id;
-      aiWindowId = tabs[0].windowId;
     } else {
       aiTabId = null;
     }
@@ -107,51 +111,86 @@ async function findAndStoreTabs() {
         tabs.find((tab) => tab.url && tab.url.includes("chat.deepseek.com")) ||
         tabs[0];
       aiTabId = preferredTab.id;
-      aiWindowId = preferredTab.windowId;
     } else {
       aiTabId = null;
     }
   }
 }
 
-async function shouldFocusTabs() {
-  await findAndStoreTabs();
-  return mheWindowId === aiWindowId;
+async function isSameWindow(tabId, otherTabId) {
+  if (!tabId || !otherTabId) return false;
+
+  try {
+    const [tab, otherTab] = await Promise.all([
+      chrome.tabs.get(tabId),
+      chrome.tabs.get(otherTabId),
+    ]);
+    return tab.windowId === otherTab.windowId;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Tabs that were open before the extension was installed or reloaded have no
+// content script until they are refreshed; inject it instead of failing.
+async function ensureAssistantScript(tabId) {
+  try {
+    await sendMessageWithRetry(tabId, { type: "ping" }, 1);
+    return;
+  } catch (error) {
+    // No listener yet, inject below.
+  }
+
+  const script = ASSISTANT_SCRIPTS[aiType];
+  if (!script) return;
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content-scripts/ai-shared.js", script],
+  });
+}
+
+async function notifyMheTab(tabId, message) {
+  if (!tabId) return;
+  try {
+    await sendMessageWithRetry(tabId, message);
+  } catch (error) {
+    console.error("Could not reach the McGraw Hill tab:", error);
+  }
 }
 
 async function processQuestion(message) {
   if (processingQuestion) return;
   processingQuestion = true;
 
+  const replyTo = message.sourceTabId || mheTabId;
+
   try {
     await findAndStoreTabs();
+    const assistantName = ASSISTANT_NAMES[aiType] || aiType;
 
     if (!aiTabId) {
-      await sendMessageWithRetry(mheTabId, {
+      await notifyMheTab(replyTo, {
         type: "alertMessage",
-        message: `Please open ${aiType} in another tab before using automation.`,
+        message: `Please open ${assistantName} in another tab before using automation.`,
       });
-      await sendMessageWithRetry(mheTabId, {
-        type: "stopAutomation",
-      });
-      processingQuestion = false;
+      await notifyMheTab(replyTo, { type: "stopAutomation" });
       return;
     }
 
-    if (!mheTabId) {
-      mheTabId = message.sourceTabId;
-    }
-
-    const sameWindow = await shouldFocusTabs();
+    const sameWindow = await isSameWindow(replyTo, aiTabId);
 
     if (sameWindow) {
       await focusTab(aiTabId);
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
+    await ensureAssistantScript(aiTabId);
     await sendMessageWithRetry(aiTabId, {
       type: "receiveQuestion",
       question: message.question,
+      requestId: message.requestId || null,
+      replyTo,
     });
 
     if (sameWindow && lastActiveTabId && lastActiveTabId !== aiTabId) {
@@ -160,15 +199,13 @@ async function processQuestion(message) {
       }, 1000);
     }
   } catch (error) {
-    if (mheTabId) {
-      await sendMessageWithRetry(mheTabId, {
-        type: "alertMessage",
-        message: `Error communicating with ${aiType}. Please make sure it's open in another tab.`,
-      });
-      await sendMessageWithRetry(mheTabId, {
-        type: "stopAutomation",
-      });
-    }
+    console.error("Error sending question to assistant:", error);
+    const assistantName = ASSISTANT_NAMES[aiType] || aiType;
+    await notifyMheTab(replyTo, {
+      type: "alertMessage",
+      message: `Error communicating with ${assistantName}. Please make sure it's open in another tab, then try again.`,
+    });
+    await notifyMheTab(replyTo, { type: "stopAutomation" });
   } finally {
     processingQuestion = false;
   }
@@ -187,41 +224,29 @@ async function processResponse(message) {
       return;
     }
 
-    if (originalTabId) {
+    // Reply to the tab that asked. The service worker may have been restarted
+    // since then, so fall back to looking the tab up again.
+    let targetTabId = message.replyTo || originalTabId || mheTabId;
+    if (!targetTabId) {
+      const mheTabs = await chrome.tabs.query({ url: MHE_URL_PATTERNS });
+      if (mheTabs.length === 0) return;
+      targetTabId = mheTabs[0].id;
+    }
+
+    if (targetTabId === originalTabId) {
       storedResponse = message.response;
-      await sendMessageWithRetry(originalTabId, {
-        type: "processChatGPTResponse",
-        response: message.response,
-        isDuplicateTab: false,
-      });
-      return;
     }
 
-    if (!mheTabId) {
-      const mheTabs = await chrome.tabs.query({
-        url: [
-          "https://learning.mheducation.com/*",
-          "https://ezto.mheducation.com/*",
-        ],
-      });
-      if (mheTabs.length > 0) {
-        mheTabId = mheTabs[0].id;
-        mheWindowId = mheTabs[0].windowId;
-      } else {
-        return;
-      }
-    }
-
-    const sameWindow = await shouldFocusTabs();
-
-    if (sameWindow) {
-      await focusTab(mheTabId);
+    if (await isSameWindow(targetTabId, message.sourceTabId || aiTabId)) {
+      await focusTab(targetTabId);
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
-    await sendMessageWithRetry(mheTabId, {
+    await sendMessageWithRetry(targetTabId, {
       type: "processChatGPTResponse",
       response: message.response,
+      requestId: message.requestId || null,
+      isDuplicateTab: false,
     });
   } catch (error) {
     console.error("Error processing AI response:", error);
@@ -258,19 +283,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     ) {
       if (!originalTabId && !duplicateTabId) {
         mheTabId = sender.tab.id;
-        mheWindowId = sender.tab.windowId;
       }
     } else if (sender.tab.url.includes("chatgpt.com")) {
       aiTabId = sender.tab.id;
-      aiWindowId = sender.tab.windowId;
       aiType = "chatgpt";
     } else if (sender.tab.url.includes("gemini.google.com")) {
       aiTabId = sender.tab.id;
-      aiWindowId = sender.tab.windowId;
       aiType = "gemini";
     } else if (isDeepSeekTabUrl(sender.tab.url || "")) {
       aiTabId = sender.tab.id;
-      aiWindowId = sender.tab.windowId;
       aiType = "deepseek";
     }
   }
@@ -292,6 +313,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     message.type === "deepseekResponse"
   ) {
     processResponse(message);
+    sendResponse({ received: true });
+    return true;
+  }
+
+  if (message.type === "assistantError") {
+    notifyMheTab(message.replyTo || mheTabId, {
+      type: "assistantError",
+      error: message.error,
+      requestId: message.requestId || null,
+    });
     sendResponse({ received: true });
     return true;
   }

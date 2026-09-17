@@ -43,11 +43,12 @@
    - Sends questions to your chosen AI assistant
    - Processes the responses
    - Automatically fills in answers
-   - Handles multiple choice, true/false, fill-in-the-blank, and matching questions
+   - Handles multiple choice, true/false, select all that apply, fill-in-the-blank, and matching questions
       - **Note about matching questions:** Matching questions now attempt full automation. If a strict, reliable match cannot be completed, the extension will show AI-suggested matches in an alert, pause, and let you finish manually before resuming on the next question.
+      - **Questions it can't answer:** If an answer can't be applied (for example an unsupported question type), the extension shows the AI's answer, pauses, and resumes automatically once you answer the question yourself and move on.
    - Navigates through forced learning sections when needed
 
-Click "Stop Automation" at any time to pause the process.
+Click "Stop Automation" at any time to pause the process. If automation has to stop on its own (for example the AI tab stopped responding), it shows an alert explaining why.
 
 ## Settings
 
