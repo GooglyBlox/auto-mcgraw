@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Auto-McGraw Smartbook",
   "version": "2.4",
-  "description": "Transfers a question from MHEducation's Smartbook to AI assistants and then uses their response to auto‐select an answer.",
+  "description": "Sends McGraw Hill SmartBook questions to an AI assistant (ChatGPT, Gemini or DeepSeek) and fills in its answers.",
   "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": [
     "https://learning.mheducation.com/*",
@@ -10,7 +10,6 @@
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
     "https://chat.deepseek.com/*",
-    "https://deepseek.chat/*",
     "https://api.github.com/*"
   ],
   "background": {
@@ -96,16 +95,6 @@
         "content/assistant/bridge.js",
         "content/assistant/deepseek.js"
       ]
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "popup/settings.html",
-        "popup/settings.css",
-        "popup/settings.js"
-      ],
-      "matches": ["<all_urls>"]
     }
   ]
 }
