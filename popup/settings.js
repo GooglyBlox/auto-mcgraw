@@ -1,219 +1,202 @@
-document.addEventListener("DOMContentLoaded", function () {
-  const DEEPSEEK_URL_PATTERNS = [
-    "https://chat.deepseek.com/*",
-  ];
-  const chatgptButton = document.getElementById("chatgpt");
-  const geminiButton = document.getElementById("gemini");
-  const deepseekButton = document.getElementById("deepseek");
-  const statusMessage = document.getElementById("status-message");
-  const currentVersionElement = document.getElementById("current-version");
+(() => {
+  const { assistants, settings } = AutoMcGraw;
+
+  const RELEASE_API_URL =
+    "https://api.github.com/repos/GooglyBlox/auto-mcgraw/releases/latest";
+  const RELEASE_CACHE_KEY = "latestRelease";
+  const RELEASE_CACHE_MS = 60 * 60 * 1000;
+  const REFRESH_DEBOUNCE_MS = 150;
+
+  const installedVersion = chrome.runtime.getManifest().version;
+
+  const assistantInputs = Array.from(
+    document.querySelectorAll('input[name="assistant"]')
+  );
+  const settingToggles = Array.from(
+    document.querySelectorAll("input[data-setting]")
+  );
+  const headerVersion = document.getElementById("header-version");
+  const installedVersionElement = document.getElementById("installed-version");
   const latestVersionElement = document.getElementById("latest-version");
-  const versionStatusElement = document.getElementById("version-status");
+  const updateStatus = document.getElementById("update-status");
+  const updateLink = document.getElementById("update-link");
   const checkUpdatesButton = document.getElementById("check-updates");
-  const footerVersionElement = document.getElementById("footer-version");
 
-  const currentVersion = chrome.runtime.getManifest().version;
-  currentVersionElement.textContent = `v${currentVersion}`;
-  footerVersionElement.textContent = `v${currentVersion}`;
+  let refreshTimer = null;
 
-  checkForUpdates();
+  function logError(error) {
+    console.error("[Auto-McGraw]", error);
+  }
 
-  checkUpdatesButton.addEventListener("click", checkForUpdates);
+  function compareVersions(a, b) {
+    const left = a.split(".").map(Number);
+    const right = b.split(".").map(Number);
+    for (
+      let index = 0;
+      index < Math.max(left.length, right.length);
+      index += 1
+    ) {
+      const difference = (left[index] || 0) - (right[index] || 0);
+      if (difference !== 0) return Math.sign(difference);
+    }
+    return 0;
+  }
 
-  chrome.storage.sync.get("aiModel", function (data) {
-    const currentModel = data.aiModel || "chatgpt";
+  function describeAssistant(assistant, isSelected, isOpen) {
+    if (isSelected && isOpen) return { state: "ready", label: "Ready to use" };
+    if (isSelected) {
+      return {
+        state: "missing",
+        label: `Open ${assistant.name} in another tab to use it`,
+      };
+    }
+    if (isOpen) return { state: "open", label: "Tab open" };
+    return { state: "closed", label: "No tab open" };
+  }
 
-    chatgptButton.classList.remove("active");
-    geminiButton.classList.remove("active");
-    deepseekButton.classList.remove("active");
+  async function renderAssistants() {
+    const [{ aiModel }, openTabs] = await Promise.all([
+      settings.load(),
+      Promise.all(
+        assistants.list.map((assistant) =>
+          chrome.tabs.query({ url: assistant.match })
+        )
+      ),
+    ]);
+    const selectedId = assistants.get(aiModel).id;
 
-    if (currentModel === "chatgpt") {
-      chatgptButton.classList.add("active");
-    } else if (currentModel === "gemini") {
-      geminiButton.classList.add("active");
-    } else if (currentModel === "deepseek") {
-      deepseekButton.classList.add("active");
+    assistants.list.forEach((assistant, index) => {
+      const option = document.querySelector(
+        `[data-assistant="${assistant.id}"]`
+      );
+      if (!option) return;
+
+      const isSelected = assistant.id === selectedId;
+      const { state, label } = describeAssistant(
+        assistant,
+        isSelected,
+        openTabs[index].length > 0
+      );
+      option.querySelector("input").checked = isSelected;
+      option.dataset.state = state;
+      option.querySelector("[data-status]").textContent = label;
+    });
+  }
+
+  async function renderToggles() {
+    const values = await settings.load();
+    settingToggles.forEach((toggle) => {
+      toggle.checked = Boolean(values[toggle.dataset.setting]);
+    });
+  }
+
+  function scheduleAssistantRefresh() {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(
+      () => renderAssistants().catch(logError),
+      REFRESH_DEBOUNCE_MS
+    );
+  }
+
+  function setUpdateStatus(state, message) {
+    updateStatus.dataset.state = state;
+    updateStatus.textContent = message;
+  }
+
+  async function fetchLatestRelease() {
+    const response = await fetch(RELEASE_API_URL, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!response.ok) {
+      throw new Error(`GitHub responded with ${response.status}`);
     }
 
-    checkModelAvailability(currentModel);
-  });
+    const release = await response.json();
+    return {
+      version: release.tag_name.replace(/^v/, ""),
+      url: release.html_url,
+      checkedAt: Date.now(),
+    };
+  }
 
-  chatgptButton.addEventListener("click", function () {
-    setActiveModel("chatgpt");
-  });
-
-  geminiButton.addEventListener("click", function () {
-    setActiveModel("gemini");
-  });
-
-  deepseekButton.addEventListener("click", function () {
-    setActiveModel("deepseek");
-  });
-
-  function setActiveModel(model) {
-    chrome.storage.sync.set({ aiModel: model }, function () {
-      chatgptButton.classList.remove("active");
-      geminiButton.classList.remove("active");
-      deepseekButton.classList.remove("active");
-
-      if (model === "chatgpt") {
-        chatgptButton.classList.add("active");
-      } else if (model === "gemini") {
-        geminiButton.classList.add("active");
-      } else if (model === "deepseek") {
-        deepseekButton.classList.add("active");
+  async function getLatestRelease(force) {
+    if (!force) {
+      const { [RELEASE_CACHE_KEY]: cached } =
+        await chrome.storage.local.get(RELEASE_CACHE_KEY);
+      if (cached && Date.now() - cached.checkedAt < RELEASE_CACHE_MS) {
+        return cached;
       }
+    }
 
-      checkModelAvailability(model);
-    });
+    const release = await fetchLatestRelease();
+    await chrome.storage.local.set({ [RELEASE_CACHE_KEY]: release });
+    return release;
   }
 
-  const doubleCreditToggle = document.getElementById("double-credit-toggle");
-  const randomConfidenceToggle = document.getElementById("random-confidence-toggle");
-  const pauseBeforeSubmitToggle = document.getElementById("pause-before-submit-toggle");
+  async function checkForUpdates(force = false) {
+    checkUpdatesButton.disabled = true;
+    updateLink.hidden = true;
+    latestVersionElement.textContent = "Checking...";
+    setUpdateStatus("checking", "Checking for updates...");
 
-  chrome.storage.sync.get(["doubleCreditMode", "randomConfidence", "pauseBeforeSubmit"], function (data) {
-    doubleCreditToggle.checked = data.doubleCreditMode || false;
-    randomConfidenceToggle.checked = data.randomConfidence || false;
-    pauseBeforeSubmitToggle.checked = data.pauseBeforeSubmit || false;
-  });
-
-  doubleCreditToggle.addEventListener("change", function () {
-    chrome.storage.sync.set({ doubleCreditMode: this.checked });
-  });
-
-  randomConfidenceToggle.addEventListener("change", function () {
-    chrome.storage.sync.set({ randomConfidence: this.checked });
-  });
-
-  pauseBeforeSubmitToggle.addEventListener("change", function () {
-    chrome.storage.sync.set({ pauseBeforeSubmit: this.checked });
-  });
-
-  function checkModelAvailability(currentModel) {
-    statusMessage.textContent = "Checking assistant availability...";
-    statusMessage.className = "";
-
-    chrome.tabs.query({ url: "https://chatgpt.com/*" }, (chatgptTabs) => {
-      const chatgptAvailable = chatgptTabs.length > 0;
-
-      chrome.tabs.query(
-        { url: "https://gemini.google.com/*" },
-        (geminiTabs) => {
-          const geminiAvailable = geminiTabs.length > 0;
-
-          chrome.tabs.query(
-            { url: DEEPSEEK_URL_PATTERNS },
-            (deepseekTabs) => {
-              const deepseekAvailable = deepseekTabs.length > 0;
-
-              if (currentModel === "chatgpt") {
-                if (chatgptAvailable) {
-                  statusMessage.textContent =
-                    "ChatGPT tab is open and ready to use.";
-                  statusMessage.className = "success";
-                } else {
-                  statusMessage.textContent =
-                    "Please open ChatGPT in another tab to use this assistant.";
-                  statusMessage.className = "error";
-                }
-              } else if (currentModel === "gemini") {
-                if (geminiAvailable) {
-                  statusMessage.textContent =
-                    "Gemini tab is open and ready to use.";
-                  statusMessage.className = "success";
-                } else {
-                  statusMessage.textContent =
-                    "Please open Gemini in another tab to use this assistant.";
-                  statusMessage.className = "error";
-                }
-              } else if (currentModel === "deepseek") {
-                if (deepseekAvailable) {
-                  statusMessage.textContent =
-                    "DeepSeek tab is open and ready to use.";
-                  statusMessage.className = "success";
-                } else {
-                  statusMessage.textContent =
-                    "Please open DeepSeek in another tab to use this assistant.";
-                  statusMessage.className = "error";
-                }
-              }
-            }
-          );
-        }
-      );
-    });
-  }
-
-  setInterval(() => {
-    chrome.storage.sync.get("aiModel", function (data) {
-      const currentModel = data.aiModel || "chatgpt";
-      checkModelAvailability(currentModel);
-    });
-  }, 5000);
-
-  async function checkForUpdates() {
     try {
-      versionStatusElement.textContent = "Checking for updates...";
-      versionStatusElement.className = "checking";
-      checkUpdatesButton.disabled = true;
-      latestVersionElement.textContent = "Checking...";
+      const release = await getLatestRelease(force);
+      latestVersionElement.textContent = `v${release.version}`;
 
-      const response = await fetch(
-        "https://api.github.com/repos/GooglyBlox/auto-mcgraw/releases/latest"
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const releaseData = await response.json();
-      const latestVersion = releaseData.tag_name.replace("v", "");
-      latestVersionElement.textContent = `v${latestVersion}`;
-
-      const currentVersionParts = currentVersion.split(".").map(Number);
-      const latestVersionParts = latestVersion.split(".").map(Number);
-
-      let isUpdateAvailable = false;
-
-      for (
-        let i = 0;
-        i < Math.max(currentVersionParts.length, latestVersionParts.length);
-        i++
-      ) {
-        const current = currentVersionParts[i] || 0;
-        const latest = latestVersionParts[i] || 0;
-
-        if (latest > current) {
-          isUpdateAvailable = true;
-          break;
-        } else if (current > latest) {
-          break;
-        }
-      }
-
-      if (isUpdateAvailable) {
-        versionStatusElement.textContent = `New version ${releaseData.tag_name} is available!`;
-        versionStatusElement.className = "update-available";
-
-        versionStatusElement.style.cursor = "pointer";
-        versionStatusElement.onclick = () => {
-          chrome.tabs.create({ url: releaseData.html_url });
-        };
+      if (compareVersions(release.version, installedVersion) > 0) {
+        setUpdateStatus(
+          "available",
+          `Version ${release.version} is available.`
+        );
+        updateLink.href = release.url;
+        updateLink.hidden = false;
       } else {
-        versionStatusElement.textContent = "You're using the latest version!";
-        versionStatusElement.className = "up-to-date";
-        versionStatusElement.style.cursor = "default";
-        versionStatusElement.onclick = null;
+        setUpdateStatus("current", "You're on the latest version.");
       }
     } catch (error) {
-      console.error("Error checking for updates:", error);
-      versionStatusElement.textContent =
-        "Error checking for updates. Please try again later.";
-      versionStatusElement.className = "error";
-      latestVersionElement.textContent = "Error";
+      logError(error);
+      latestVersionElement.textContent = "Unavailable";
+      setUpdateStatus("error", "Couldn't check for updates. Try again later.");
     } finally {
       checkUpdatesButton.disabled = false;
     }
   }
-});
+
+  headerVersion.textContent = `v${installedVersion}`;
+  installedVersionElement.textContent = `v${installedVersion}`;
+
+  assistantInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked) {
+        settings.save({ aiModel: input.value }).catch(logError);
+      }
+    });
+  });
+
+  settingToggles.forEach((toggle) => {
+    toggle.addEventListener("change", () => {
+      settings
+        .save({ [toggle.dataset.setting]: toggle.checked })
+        .catch(logError);
+    });
+  });
+
+  checkUpdatesButton.addEventListener("click", () => checkForUpdates(true));
+
+  settings.subscribe(() => {
+    renderAssistants().catch(logError);
+    renderToggles().catch(logError);
+  });
+
+  chrome.tabs.onCreated.addListener(scheduleAssistantRefresh);
+  chrome.tabs.onRemoved.addListener(scheduleAssistantRefresh);
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.url || changeInfo.status === "complete") {
+      scheduleAssistantRefresh();
+    }
+  });
+
+  renderAssistants().catch(logError);
+  renderToggles().catch(logError);
+  checkForUpdates();
+})();
