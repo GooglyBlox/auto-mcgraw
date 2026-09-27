@@ -1,5 +1,6 @@
 (() => {
-  const { text, wait } = AutoMcGraw;
+  const { text, wait, dom } = AutoMcGraw;
+  const { KEYS, pressKey } = dom;
 
   const ALL_CHOICES =
     '.choice-item-wrapper:not(.-placeholder)[id^="choices:"], .choice-item-wrapper:not(.-placeholder)[id^="response:"]';
@@ -11,39 +12,7 @@
   const MAX_PASSES = 4;
   const LOG_PREFIX = "[Auto-McGraw]";
 
-  const KEYS = {
-    space: { key: " ", code: "Space", keyCode: 32 },
-    enter: { key: "Enter", code: "Enter", keyCode: 13 },
-    up: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
-    down: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
-  };
   const LIFT_KEYS = [KEYS.space, KEYS.enter];
-
-  function keyboardEvent(type, { key, code, keyCode }) {
-    const event = new KeyboardEvent(type, {
-      key,
-      code,
-      keyCode,
-      which: keyCode,
-      charCode: keyCode,
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-    });
-
-    try {
-      Object.defineProperty(event, "keyCode", { get: () => keyCode });
-      Object.defineProperty(event, "which", { get: () => keyCode });
-    } catch {
-      return event;
-    }
-    return event;
-  }
-
-  function pressKey(target, definition) {
-    target.dispatchEvent(keyboardEvent("keydown", definition));
-    target.dispatchEvent(keyboardEvent("keyup", definition));
-  }
 
   function component(container) {
     return container?.querySelector(".matching-component") || null;

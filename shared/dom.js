@@ -1,4 +1,11 @@
 (() => {
+  const KEYS = Object.freeze({
+    space: { key: " ", code: "Space", keyCode: 32 },
+    enter: { key: "Enter", code: "Enter", keyCode: 13 },
+    up: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+    down: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+  });
+
   function queryFirst(selectors, root = document) {
     for (const selector of selectors) {
       let element = null;
@@ -38,10 +45,38 @@
     dispatchInputEvents(input);
   }
 
+  function keyboardEvent(type, { key, code, keyCode }) {
+    const event = new KeyboardEvent(type, {
+      key,
+      code,
+      keyCode,
+      which: keyCode,
+      charCode: keyCode,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+
+    try {
+      Object.defineProperty(event, "keyCode", { get: () => keyCode });
+      Object.defineProperty(event, "which", { get: () => keyCode });
+    } catch {
+      return event;
+    }
+    return event;
+  }
+
+  function pressKey(target, definition) {
+    target.dispatchEvent(keyboardEvent("keydown", definition));
+    target.dispatchEvent(keyboardEvent("keyup", definition));
+  }
+
   AutoMcGraw.dom = {
+    KEYS,
     queryFirst,
     isEnabled,
     dispatchInputEvents,
     setInputValue,
+    pressKey,
   };
 })();
