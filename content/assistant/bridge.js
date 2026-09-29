@@ -4,9 +4,21 @@
 
   const IDLE_TIMEOUT_MS = 120000;
   const INPUT_TIMEOUT_MS = 10000;
+  const SEND_BUTTON_TIMEOUT_MS = 3000;
   const SEND_CONFIRM_MS = 5000;
   const SEND_ATTEMPTS = 2;
+  const UNSAFE_BUTTON_LABEL = /voice|dictat|speech|microphone|stop|cancel/i;
   const LOG_PREFIX = "[Auto-McGraw]";
+
+  function isSendButton(button) {
+    if (!dom.isEnabled(button)) return false;
+    const label = [
+      button.getAttribute("aria-label"),
+      button.getAttribute("title"),
+      button.textContent,
+    ].join(" ");
+    return !UNSAFE_BUTTON_LABEL.test(label);
+  }
 
   function escapeHtml(value) {
     return String(value)
@@ -60,20 +72,33 @@
 
     function findSendButton() {
       for (const selector of adapter.sendSelectors) {
-        let button = null;
+        let matches = [];
         try {
-          button = document.querySelector(selector);
+          matches = Array.from(document.querySelectorAll(selector));
         } catch {
           continue;
         }
-        if (dom.isEnabled(button)) return button;
+        const button = matches.find(isSendButton);
+        if (button) return button;
       }
-      return adapter.findFallbackSendButton?.() || null;
+
+      const fallback = adapter.findFallbackSendButton?.();
+      return isSendButton(fallback) ? fallback : null;
     }
 
     function countUserMessages() {
       if (!adapter.userMessageSelector) return 0;
       return document.querySelectorAll(adapter.userMessageSelector).length;
+    }
+
+    function waitUntilSent(input, userMessages) {
+      return wait.waitFor(
+        () =>
+          !getComposerText(input).trim() ||
+          isBusy() ||
+          countUserMessages() > userMessages,
+        { timeout: SEND_CONFIRM_MS }
+      );
     }
 
     async function sendPrompt(prompt) {
@@ -105,23 +130,19 @@
         }
 
         const sendButton = await wait.waitFor(findSendButton, {
-          timeout: INPUT_TIMEOUT_MS,
+          timeout: SEND_BUTTON_TIMEOUT_MS,
         });
         if (sendButton) {
           sendButton.click();
-        } else if (typeof input.form?.requestSubmit === "function") {
-          input.form.requestSubmit();
         } else {
-          throw new Error(`Could not find the ${name} send button.`);
+          dom.pressKey(input, dom.KEYS.enter);
         }
 
-        const sent = await wait.waitFor(
-          () =>
-            !getComposerText(input).trim() ||
-            isBusy() ||
-            countUserMessages() > userMessages,
-          { timeout: SEND_CONFIRM_MS }
-        );
+        let sent = await waitUntilSent(input, userMessages);
+        if (!sent && sendButton) {
+          dom.pressKey(input, dom.KEYS.enter);
+          sent = await waitUntilSent(input, userMessages);
+        }
         if (sent) return taken;
       }
 

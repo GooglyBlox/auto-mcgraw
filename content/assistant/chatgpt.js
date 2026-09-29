@@ -1,7 +1,9 @@
 (() => {
   const { dom, assistantBridge } = AutoMcGraw;
 
+  const COMPOSER = "form[data-chatgpt-composer]";
   const STOP_SELECTORS = [
+    `${COMPOSER} button[aria-label^="Stop" i]:not([aria-label*="voice" i]):not([aria-label*="dictat" i])`,
     '[data-testid="stop-button"]',
     'button[aria-label="Stop streaming"]',
     'button[aria-label="Stop generating"]',
@@ -14,15 +16,19 @@
 
   assistantBridge.register("chatgpt", {
     inputSelectors: [
+      `${COMPOSER} [contenteditable="true"]`,
       "#prompt-textarea",
       'textarea[name="prompt"]',
       "#mobile-composer-prompt",
       'div[contenteditable="true"][role="textbox"]',
     ],
     sendSelectors: [
+      `${COMPOSER} button[type="submit"]`,
+      `${COMPOSER} button[aria-label="Send"]`,
       '[data-testid="send-button"]',
-      'button[aria-label="Send message"]',
+      "#composer-submit-button",
       'button[aria-label="Send prompt"]',
+      'button[aria-label="Send message"]',
     ],
     userMessageSelector:
       '[data-message-author-role="user"], li[data-message-role="user"]',
