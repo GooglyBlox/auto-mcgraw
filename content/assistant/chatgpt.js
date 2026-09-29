@@ -9,10 +9,35 @@
     'button[aria-label="Stop generating"]',
     'button[aria-label="Stop"]',
   ];
-  const RESPONSE_SELECTOR =
+  const LEGACY_RESPONSE_SELECTOR =
     '[data-message-author-role="assistant"], li[data-message-role="assistant"]';
+  const MESSAGE_ID_ATTRIBUTE = "data-chatgpt-selection-message-id";
 
   const isStreaming = () => Boolean(dom.queryFirst(STOP_SELECTORS));
+
+  function getResponses() {
+    const legacy = document.querySelectorAll(LEGACY_RESPONSE_SELECTOR);
+    if (legacy.length > 0) return Array.from(legacy);
+
+    return Array.from(
+      document.querySelectorAll('[data-conversation-role="assistant"]')
+    ).map(
+      (heading) =>
+        heading.closest("[data-chatgpt-search-unit-key]") ||
+        heading.parentElement
+    );
+  }
+
+  function getMessageId(node) {
+    return (
+      node.getAttribute("data-message-id") ||
+      node
+        .querySelector(`[${MESSAGE_ID_ATTRIBUTE}]`)
+        ?.getAttribute(MESSAGE_ID_ATTRIBUTE) ||
+      node.id ||
+      null
+    );
+  }
 
   assistantBridge.register("chatgpt", {
     inputSelectors: [
@@ -31,11 +56,9 @@
       'button[aria-label="Send message"]',
     ],
     userMessageSelector:
-      '[data-message-author-role="user"], li[data-message-role="user"]',
-    getResponses: () =>
-      Array.from(document.querySelectorAll(RESPONSE_SELECTOR)),
-    getMessageId: (node) =>
-      node.getAttribute("data-message-id") || node.id || null,
+      '[data-message-author-role="user"], li[data-message-role="user"], [data-user-message-bubble]',
+    getResponses,
+    getMessageId,
     isBusy: isStreaming,
     isGenerating(node) {
       if (node.hasAttribute("data-message-role")) {
