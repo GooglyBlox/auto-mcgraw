@@ -12,9 +12,17 @@
   const SELECT_TEXT_CHOICE = ".select-text-component .choice.-interactive";
   const BLANK_UI_SPANS =
     "span.fitb-span, span.blank-label, span.correctness, span._visuallyHidden";
+  const PROBE_CONTENT = '[class*="awd-probe-type-"], .prompt, .choiceText';
+
+  function hasContent(container) {
+    return Boolean(container.querySelector(PROBE_CONTENT));
+  }
 
   function findContainer() {
-    return document.querySelector(".probe-container");
+    const containers = Array.from(
+      document.querySelectorAll(".probe-container")
+    );
+    return containers.find(hasContent) || containers[0] || null;
   }
 
   function detectType(container) {
@@ -35,6 +43,7 @@
   }
 
   function isAnswerable(container) {
+    if (!hasContent(container)) return false;
     if (container.querySelector('[class*="awd-probe-mode-"]')) {
       return Boolean(container.querySelector(".awd-probe-mode-testing"));
     }
