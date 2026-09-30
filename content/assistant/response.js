@@ -104,6 +104,23 @@
     return taken.lastText === null || node.textContent !== taken.lastText;
   }
 
+  function scrollToBottom(node) {
+    node.scrollIntoView?.({ block: "end" });
+    for (
+      let element = node.parentElement;
+      element && element !== document.documentElement;
+      element = element.parentElement
+    ) {
+      const { overflowY } = getComputedStyle(element);
+      if (
+        /(auto|scroll)/.test(overflowY) &&
+        element.scrollHeight > element.clientHeight
+      ) {
+        element.scrollTop = element.scrollHeight;
+      }
+    }
+  }
+
   function watch({
     snapshot: taken,
     getResponses,
@@ -118,7 +135,13 @@
     let candidateSince = 0;
 
     const observer = new MutationObserver(check);
-    const intervalId = setInterval(check, 1000);
+    const intervalId = setInterval(tick, 1000);
+
+    function tick() {
+      const nodes = getResponses();
+      if (nodes.length > 0) scrollToBottom(nodes[nodes.length - 1]);
+      check();
+    }
 
     function stop() {
       finished = true;
