@@ -66,6 +66,34 @@ jobs:
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Collect contributors
+        id: contributors
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST_TAG: ${{ needs.check-version.outputs.last_tag }}
+        run: |
+          if [ "$LATEST_TAG" = "none" ]; then
+            RANGE="HEAD"
+            AUTHORS=""
+          else
+            RANGE="$LATEST_TAG..HEAD"
+            AUTHORS=$(gh api "repos/$GITHUB_REPOSITORY/compare/$LATEST_TAG...$GITHUB_SHA" --jq '.commits[].author.login // empty')
+          fi
+          CO_AUTHORS=$(git log $RANGE --format='%(trailers:key=Co-authored-by,valueonly)' \
+            | grep -oE '[0-9]+\+[A-Za-z0-9-]+@users\.noreply\.github\.com' \
+            | sed -E 's/^[0-9]+\+([^@]+)@.*/\1/')
+          THANKED=$(git log $RANGE --format='%(trailers:key=Thanks,valueonly)' \
+            | grep -oE '@[A-Za-z0-9-]+' \
+            | sed 's/^@//')
+          MENTIONS=$(printf '%s\n' $AUTHORS $CO_AUTHORS $THANKED \
+            | awk -v owner="$GITHUB_REPOSITORY_OWNER" 'NF && tolower($0) != tolower(owner) && $0 !~ /\[bot\]$/' \
+            | sort -fu \
+            | sed 's/^/@/' \
+            | paste -sd ' ' -)
+          if [ -n "$MENTIONS" ]; then
+            echo "thanks=Thanks to $MENTIONS for code, reports and ideas." >> $GITHUB_OUTPUT
+          fi
+
       - name: Create zip file
         run: |
           zip -r auto-mcgraw.zip \
@@ -87,6 +115,8 @@ jobs:
             Changes in this release:
             
             ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ${{ steps.contributors.outputs.thanks }}
           files: auto-mcgraw.zip
           draft: false
           prerelease: false
