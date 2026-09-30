@@ -12,25 +12,35 @@
   const LEGACY_RESPONSE_SELECTOR =
     '[data-message-author-role="assistant"], li[data-message-role="assistant"]';
   const MESSAGE_ID_ATTRIBUTE = "data-chatgpt-selection-message-id";
+  const REPLY_MARKERS =
+    '[data-conversation-role="assistant"], [data-markdown-text-style="assistant-message"]';
+  const STREAMING_MARKER = '[data-is-streaming="true"]';
 
   const isStreaming = () => Boolean(dom.queryFirst(STOP_SELECTORS));
+
+  function replyContainer(marker) {
+    return (
+      marker.closest("[data-chatgpt-search-unit-key]") ||
+      marker.closest(`[${MESSAGE_ID_ATTRIBUTE}]`) ||
+      marker.parentElement
+    );
+  }
 
   function getResponses() {
     const legacy = document.querySelectorAll(LEGACY_RESPONSE_SELECTOR);
     if (legacy.length > 0) return Array.from(legacy);
 
-    return Array.from(
-      document.querySelectorAll('[data-conversation-role="assistant"]')
-    ).map(
-      (heading) =>
-        heading.closest("[data-chatgpt-search-unit-key]") ||
-        heading.parentElement
-    );
+    return [
+      ...new Set(
+        Array.from(document.querySelectorAll(REPLY_MARKERS), replyContainer)
+      ),
+    ];
   }
 
   function getMessageId(node) {
     return (
       node.getAttribute("data-message-id") ||
+      node.getAttribute(MESSAGE_ID_ATTRIBUTE) ||
       node
         .querySelector(`[${MESSAGE_ID_ATTRIBUTE}]`)
         ?.getAttribute(MESSAGE_ID_ATTRIBUTE) ||
@@ -64,7 +74,11 @@
       if (node.hasAttribute("data-message-role")) {
         return !node.hasAttribute("data-message-complete");
       }
-      return isStreaming() || Boolean(node.querySelector(".result-streaming"));
+      return (
+        isStreaming() ||
+        node.matches(STREAMING_MARKER) ||
+        Boolean(node.querySelector(`.result-streaming, ${STREAMING_MARKER}`))
+      );
     },
   });
 })();
