@@ -15,7 +15,7 @@ jobs:
       has_changed: ${{ steps.version-check.outputs.has_changed }}
       last_tag: ${{ steps.get-latest-tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       
@@ -49,7 +49,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -66,20 +66,48 @@ jobs:
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Collect contributors
+        id: contributors
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST_TAG: ${{ needs.check-version.outputs.last_tag }}
+        run: |
+          if [ "$LATEST_TAG" = "none" ]; then
+            RANGE="HEAD"
+            AUTHORS=""
+          else
+            RANGE="$LATEST_TAG..HEAD"
+            AUTHORS=$(gh api "repos/$GITHUB_REPOSITORY/compare/$LATEST_TAG...$GITHUB_SHA" --jq '.commits[].author.login // empty')
+          fi
+          CO_AUTHORS=$(git log $RANGE --format='%(trailers:key=Co-authored-by,valueonly)' \
+            | grep -oE '[0-9]+\+[A-Za-z0-9-]+@users\.noreply\.github\.com' \
+            | sed -E 's/^[0-9]+\+([^@]+)@.*/\1/')
+          THANKED=$(git log $RANGE --format='%(trailers:key=Thanks,valueonly)' \
+            | grep -oE '@[A-Za-z0-9-]+' \
+            | sed 's/^@//')
+          MENTIONS=$(printf '%s\n' $AUTHORS $CO_AUTHORS $THANKED \
+            | awk -v owner="$GITHUB_REPOSITORY_OWNER" 'NF && tolower($0) != tolower(owner) && $0 !~ /\[bot\]$/' \
+            | sort -fu \
+            | sed 's/^/@/' \
+            | paste -sd ' ' -)
+          if [ -n "$MENTIONS" ]; then
+            echo "thanks=Thanks to $MENTIONS for code, reports and ideas." >> $GITHUB_OUTPUT
+          fi
+
       - name: Create zip file
         run: |
           zip -r auto-mcgraw.zip \
             manifest.json \
             LICENSE \
             assets/icon.png \
-            assets/settings-icon.svg \
             background \
-            content-scripts \
-            popup
+            content \
+            popup \
+            shared
 
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.check-version.outputs.version }}
           name: Release v${{ needs.check-version.outputs.version }}
@@ -87,6 +115,8 @@ jobs:
             Changes in this release:
             
             ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ${{ steps.contributors.outputs.thanks }}
           files: auto-mcgraw.zip
           draft: false
           prerelease: false
