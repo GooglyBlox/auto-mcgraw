@@ -107,6 +107,12 @@
     return `${error.message}\n\nMake sure ${name} is open, signed in and not showing an error or popup, then click "Ask ${name}" to continue.`;
   }
 
+  function hasQuestionContent({ question, options }) {
+    if (question?.trim()) return true;
+    if (Array.isArray(options)) return options.length > 0;
+    return Boolean(options?.prompts?.length || options?.choices?.length);
+  }
+
   function manualAnswerMessage(heading, lines, instructions) {
     const suggestion = lines?.length
       ? `AI answer:\n${lines.join("\n")}`
@@ -162,6 +168,13 @@
       }
 
       async function ask(question) {
+        if (!hasQuestionContent(question)) {
+          throw new AssistantError(
+            "Couldn't read the question on this page, so nothing was sent to the AI. This page layout may not be supported yet.",
+            true
+          );
+        }
+
         for (let attempt = 0; ; attempt += 1) {
           try {
             const answer = await requestAnswer(question, signal);
