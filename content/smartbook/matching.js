@@ -3,11 +3,11 @@
   const { KEYS, pressKey } = dom;
 
   const ALL_CHOICES =
-    '.choice-item-wrapper:not(.-placeholder)[id^="choices:"], .choice-item-wrapper:not(.-placeholder)[id^="response:"]';
+    '.choice-item-wrapper:not(.-placeholder)[id^="choices:"], .choice-item-wrapper:not(.-placeholder)[id^="response:"], .draggableItem[data-item-key]';
   const POOL_CHOICES =
-    '.choices-container .choice-item-wrapper:not(.-placeholder)[id^="choices:"]';
+    '.choices-container .choice-item-wrapper:not(.-placeholder)[id^="choices:"], .choices-container .draggableItem[data-item-key]';
   const ROW_CHOICE =
-    '.match-single-response-wrapper .choice-item-wrapper:not(.-placeholder)[id^="choices:"], .match-single-response-wrapper .choice-item-wrapper:not(.-placeholder)[id^="response:"]';
+    '.match-single-response-wrapper .choice-item-wrapper:not(.-placeholder)[id^="choices:"], .match-single-response-wrapper .choice-item-wrapper:not(.-placeholder)[id^="response:"], .draggableItem[data-item-key]';
   const DRAG_HANDLE = "[data-react-beautiful-dnd-drag-handle]";
   const MAX_PASSES = 4;
   const LOG_PREFIX = "[Auto-McGraw]";
@@ -39,7 +39,10 @@
 
   function choiceText(item) {
     if (!item) return "";
-    const content = item.querySelector(".content") || item.querySelector("p");
+    const content =
+      item.querySelector(".dragItemContent") ||
+      item.querySelector(".content") ||
+      item.querySelector("p");
     return text.normalizeChoiceText((content || item).textContent || "");
   }
 
@@ -372,6 +375,41 @@
   }
 
   async function placeTarget(container, target) {
+    const origin = locateChoice(container, target.choiceText);
+    if (origin?.item.matches('.draggableItem[draggable="true"]')) {
+      if (origin.rowIndex === target.rowIndex) return true;
+      const destination = rows(container)[target.rowIndex]?.querySelector(
+        '[data-drop-target-for-element="true"]'
+      );
+      if (!destination) return false;
+
+      const dataTransfer = new DataTransfer();
+      const rect = destination.getBoundingClientRect();
+      const dispatch = (element, type) =>
+        element.dispatchEvent(new DragEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+        }));
+
+      try {
+        dispatch(origin.item, "dragstart");
+        await wait.delay(80);
+        dispatch(destination, "dragenter");
+        dispatch(destination, "dragover");
+        await wait.delay(80);
+        dispatch(destination, "drop");
+      } finally {
+        dispatch(origin.item, "dragend");
+      }
+      await wait.delay(120);
+      return (
+        locateChoice(container, target.choiceText)?.rowIndex === target.rowIndex
+      );
+    }
+
     for (const liftKey of LIFT_KEYS) {
       const location = locateChoice(container, target.choiceText);
       if (!location) return false;
