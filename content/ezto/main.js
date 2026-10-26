@@ -12,6 +12,7 @@
   let currentSettings = { ...settings.DEFAULTS };
 
   function detectType() {
+    if (multipleSelectInputs().length) return "multiple_select";
     for (const [type, selector] of ANSWER_TYPES) {
       if (document.querySelector(selector)) return type;
     }
@@ -28,6 +29,42 @@
     return Array.from(
       document.querySelectorAll(".answers--mc .answer__label--mc")
     ).map((label) => label.textContent.trim().replace(/^[a-z]\s+/, ""));
+  }
+
+  function multipleSelectInputs() {
+    return Array.from(document.querySelectorAll(
+      '.answers-wrap input[type="checkbox"], .answers--mr input[type="checkbox"], .answers--ms input[type="checkbox"]'
+    )).filter((input) => !input.closest('[hidden], [aria-hidden="true"]'));
+  }
+
+  function checkboxLabel(input) {
+    const labels = Array.from(input.labels || []);
+    let label = labels.map((element) => text.readableText(element)).join(" ").trim();
+    if (!label) {
+      label = (input.getAttribute("aria-labelledby") || "").split(/\s+/)
+        .map((id) => text.readableText(document.getElementById(id))).join(" ").trim();
+    }
+    if (!label) label = input.getAttribute("aria-label") || "";
+    if (!label) {
+      const row = input.closest('.answer, [class*="answer--"]');
+      label = text.readableText(row);
+    }
+    return label.replace(/^[a-z][.):]\s+/i, "").trim();
+  }
+
+  function selectMultiple(values) {
+    const inputs = multipleSelectInputs();
+    const labels = inputs.map(checkboxLabel);
+    if (!values.length || labels.some((label) => !label)) return false;
+    // Validate the entire reply before changing any existing selections.
+    const indices = values.map((value) => text.findChoiceIndex(labels, value));
+    if (indices.some((index) => index < 0)) return false;
+    const selected = new Set(indices);
+    if (inputs.some((input, index) => input.matches(':disabled') && input.checked !== selected.has(index))) return false;
+    inputs.forEach((input, index) => {
+      if (input.checked !== selected.has(index)) input.click();
+    });
+    return inputs.every((input, index) => input.isConnected && input.checked === selected.has(index));
   }
 
   function readQuestionText(questionElement, type) {
@@ -49,7 +86,10 @@
     if (!questionElement || !type) return null;
 
     let options = [];
-    if (type === "multiple_choice") {
+    if (type === "multiple_select") {
+      options = multipleSelectInputs().map(checkboxLabel);
+      if (!options.length || options.some((label) => !label)) return null;
+    } else if (type === "multiple_choice") {
       options = multipleChoiceLabels();
     } else if (type === "true_false") {
       options = ["True", "False"];
@@ -123,6 +163,7 @@
   }
 
   function applyAnswer(type, values) {
+    if (type === "multiple_select") return selectMultiple(values);
     if (type === "multiple_choice") return selectMultipleChoice(values);
     if (type === "true_false") return selectTrueFalse(values);
     if (type === "fill_in_the_blank") return fillBlank(values);
